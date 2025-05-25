@@ -9,11 +9,11 @@ namespace BetterGenshinImpact.Core.Config;
 [Serializable]
 public partial class GenshinStartConfig : ObservableObject
 {
-    /// <summary>
-    ///     自动点击月卡
-    /// </summary>
-    [ObservableProperty]
-    private bool _autoClickBlessingOfTheWelkinMoonEnabled;
+    // /// <summary>
+    // ///     自动点击月卡
+    // /// </summary>
+    // [ObservableProperty]
+    // private bool _autoClickBlessingOfTheWelkinMoonEnabled;
 
     /// <summary>
     ///     自动进入游戏（开门）
@@ -38,4 +38,10 @@ public partial class GenshinStartConfig : ObservableObject
     /// </summary>
     [ObservableProperty]
     private bool _linkedStartEnabled = true;
+
+    /// <summary>
+    ///     使用Starward同步记录时间
+    /// </summary>
+    [ObservableProperty]
+    private bool _recordGameTimeEnabled = false;
 }

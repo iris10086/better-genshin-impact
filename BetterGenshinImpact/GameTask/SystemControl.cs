@@ -1,6 +1,8 @@
 ﻿using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Vanara.PInvoke;
 
@@ -15,6 +17,11 @@ public class SystemControl
 
     public static async Task<nint> StartFromLocalAsync(string path)
     {
+        if (!File.Exists(path))
+        {
+           throw new Exception($"原神启动路径 {path} 不存在，请前往 启动——同时启动原神——原神安装路径 重新进行配置！");
+        }
+        
         // 直接exe启动
         Process.Start(new ProcessStartInfo(path)
         {
@@ -36,6 +43,7 @@ public class SystemControl
 
             await Task.Delay(5577);
         }
+
         return FindGenshinImpactHandle();
     }
 
@@ -178,18 +186,43 @@ public class SystemControl
         ActivateWindow(TaskContext.Instance().GameHandle);
     }
 
-    public static void Focus(nint hWnd)
+    public static void FocusWindow(nint hWnd)
     {
         if (User32.IsWindow(hWnd))
         {
             _ = User32.SendMessage(hWnd, User32.WindowMessage.WM_SYSCOMMAND, User32.SysCommand.SC_RESTORE, 0);
             _ = User32.SetForegroundWindow(hWnd);
+
             while (User32.IsIconic(hWnd))
             {
                 continue;
             }
 
             _ = User32.BringWindowToTop(hWnd);
+            _ = User32.SetActiveWindow(hWnd);
+        }
+    }
+    public static void MinimizeAndActivateWindow(nint hWnd)
+    {
+        HWND hShell = User32.FindWindow("Shell_TrayWnd", null);
+        User32.SendMessage(hShell, 0x0111, (IntPtr)419, IntPtr.Zero);
+        Thread.Sleep(500);
+        FocusWindow(hWnd);
+    }
+    public static void RestoreWindow(nint hWnd)
+    {
+        if (User32.IsWindow(hWnd))
+        {
+            _ = User32.SendMessage(hWnd, User32.WindowMessage.WM_SYSCOMMAND, User32.SysCommand.SC_RESTORE, 0);
+            _ = User32.SetForegroundWindow(hWnd);
+
+            if (User32.IsIconic(hWnd))
+            {
+                _ = User32.ShowWindow(hWnd, ShowWindowCommand.SW_RESTORE);
+            }
+
+            _ = User32.BringWindowToTop(hWnd);
+            _ = User32.SetActiveWindow(hWnd);
         }
     }
 
@@ -233,4 +266,60 @@ public class SystemControl
     //     // TODO：点完之后有个15s的倒计时，好像不处理也没什么问题，直接睡个20s吧
     //     Thread.Sleep(20000);
     // }
+    public static void CloseGame()
+    {
+        try
+        {
+            // 尝试通过进程名称查找原神进程
+            var processes = Process.GetProcessesByName("YuanShen")
+                .Concat(Process.GetProcessesByName("GenshinImpact"))
+                .Concat(Process.GetProcessesByName("Genshin Impact Cloud Game"))
+                .ToArray();
+
+            if (processes.Length > 0)
+            {
+                foreach (var process in processes)
+                {
+                    try
+                    {
+                        // 尝试正常关闭进程
+                        process.CloseMainWindow();
+                        
+                        // 给进程一些时间来响应关闭请求
+                        if (!process.WaitForExit(5000))
+                        {
+                            // 如果进程没有在5秒内关闭，则强制终止它
+                            process.Kill();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine($"关闭游戏进程时出错: {ex.Message}");
+                    }
+                    finally
+                    {
+                        process.Dispose();
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"CloseGame方法执行出错: {ex.Message}");
+        }
+    }
+
+    public static void Shutdown()
+    {
+        try
+        {
+            // 使用Windows API安全关闭系统
+            // 这里使用的是标准的Windows关机命令，需要适当的权限
+            Process.Start("shutdown", "/s /t 60 /c \"系统将在60秒后关闭，请保存您的工作。\"");
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Shutdown方法执行出错: {ex.Message}");
+        }
+    }
 }

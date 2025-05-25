@@ -7,13 +7,18 @@ using BetterGenshinImpact.GameTask.AutoGeniusInvokation;
 using BetterGenshinImpact.GameTask.AutoPick;
 using BetterGenshinImpact.GameTask.AutoSkip;
 using BetterGenshinImpact.GameTask.AutoWood;
+using BetterGenshinImpact.GameTask.AutoMusicGame;
 using BetterGenshinImpact.GameTask.QuickTeleport;
 using BetterGenshinImpact.Service.Notification;
 using CommunityToolkit.Mvvm.ComponentModel;
 using Fischless.GameCapture;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Text.Json.Serialization;
+using System.Threading.Tasks;
+using BetterGenshinImpact.GameTask.AutoTrackPath;
+using BetterGenshinImpact.GameTask.AutoArtifactSalvage;
 
 namespace BetterGenshinImpact.Core.Config;
 
@@ -47,19 +52,34 @@ public partial class AllConfig : ObservableObject
     [ObservableProperty]
     private int _triggerInterval = 50;
 
+    // /// <summary>
+    // ///     WGC使用位图缓存
+    // ///     高帧率情况下，可能会导致卡顿
+    // ///     云原神可能会出现黑屏
+    // /// </summary>
+    // [ObservableProperty]
+    // private bool _wgcUseBitmapCache = true;
+
     /// <summary>
-    ///     WGC使用位图缓存
-    ///     高帧率情况下，可能会导致卡顿
-    ///     云原神可能会出现黑屏
+    /// 自动修复Win11下BitBlt截图方式不可用的问题
     /// </summary>
     [ObservableProperty]
-    private bool _wgcUseBitmapCache = true;
+    private bool _autoFixWin11BitBlt = true;
 
     /// <summary>
     /// 推理使用的设备
     /// </summary>
     [ObservableProperty]
     private string _inferenceDevice = "CPU";
+
+    [ObservableProperty]
+    private List<ValueTuple<string, int, string, string>> _nextScheduledTask = [];
+
+    /// <summary>
+    /// 一条龙选中使用的配置
+    /// </summary>
+    [ObservableProperty]
+    private string _selectedOneDragonFlowConfigName = string.Empty;
 
     /// <summary>
     ///     遮罩窗口配置
@@ -115,6 +135,11 @@ public partial class AllConfig : ObservableObject
     ///     自动战斗配置
     /// </summary>
     public AutoFightConfig AutoFightConfig { get; set; } = new();
+    
+    /// <summary>
+    ///     自动乐曲配置 - 千音雅集
+    /// </summary>
+    public AutoMusicGameConfig AutoMusicGameConfig { get; set; } = new();
 
     /// <summary>
     ///     自动秘境配置
@@ -122,11 +147,26 @@ public partial class AllConfig : ObservableObject
     public AutoDomainConfig AutoDomainConfig { get; set; } = new();
 
     /// <summary>
-    ///     脚本类配置
+    ///     自动分解圣遗物配置
+    /// </summary>
+    public AutoArtifactSalvageConfig AutoArtifactSalvageConfig { get; set; } = new();
+
+    /// <summary>
+    ///     宏配置
     /// </summary>
     public MacroConfig MacroConfig { get; set; } = new();
 
     public RecordConfig RecordConfig { get; set; } = new();
+
+    /// <summary>
+    /// 脚本配置
+    /// </summary>
+    public ScriptConfig ScriptConfig { get; set; } = new();
+
+    /// <summary>
+    /// 地图追踪配置
+    /// </summary>
+    public PathingConditionConfig PathingConditionConfig { get; set; } = PathingConditionConfig.Default;
 
     /// <summary>
     ///     快捷键配置
@@ -138,6 +178,18 @@ public partial class AllConfig : ObservableObject
     /// </summary>
     public NotificationConfig NotificationConfig { get; set; } = new();
 
+    /// <summary>
+    /// 原神按键绑定配置
+    /// </summary>
+    public KeyBindingsConfig KeyBindingsConfig { get; set; } = new();
+    /// <summary>
+    /// 其他配置
+    /// </summary>
+    public OtherConfig OtherConfig { get; set; } = new();
+    /// <summary>
+    /// 传送相关配置
+    /// </summary>
+    public TpConfig TpConfig { get; set; } = new();
     [JsonIgnore]
     public Action? OnAnyChangedAction { get; set; }
 
@@ -149,7 +201,7 @@ public partial class AllConfig : ObservableObject
         GenshinStartConfig.PropertyChanged += OnAnyPropertyChanged;
         NotificationConfig.PropertyChanged += OnAnyPropertyChanged;
         NotificationConfig.PropertyChanged += OnNotificationPropertyChanged;
-
+        KeyBindingsConfig.PropertyChanged += OnAnyPropertyChanged;
         AutoPickConfig.PropertyChanged += OnAnyPropertyChanged;
         AutoSkipConfig.PropertyChanged += OnAnyPropertyChanged;
         AutoFishingConfig.PropertyChanged += OnAnyPropertyChanged;
@@ -160,6 +212,11 @@ public partial class AllConfig : ObservableObject
         AutoWoodConfig.PropertyChanged += OnAnyPropertyChanged;
         AutoFightConfig.PropertyChanged += OnAnyPropertyChanged;
         AutoDomainConfig.PropertyChanged += OnAnyPropertyChanged;
+        AutoArtifactSalvageConfig.PropertyChanged += OnAnyPropertyChanged;
+        AutoMusicGameConfig.PropertyChanged += OnAnyPropertyChanged;
+        TpConfig.PropertyChanged += OnAnyPropertyChanged;
+        ScriptConfig.PropertyChanged += OnAnyPropertyChanged;
+        PathingConditionConfig.PropertyChanged += OnAnyPropertyChanged;
     }
 
     public void OnAnyPropertyChanged(object? sender, EventArgs args)

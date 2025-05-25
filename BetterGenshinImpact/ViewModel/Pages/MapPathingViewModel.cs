@@ -1,74 +1,79 @@
 ﻿using BetterGenshinImpact.Core.Config;
-using BetterGenshinImpact.Core.Script;
 using BetterGenshinImpact.Core.Script.Group;
 using BetterGenshinImpact.Core.Script.Project;
-using BetterGenshinImpact.GameTask;
 using BetterGenshinImpact.GameTask.AutoPathing;
 using BetterGenshinImpact.GameTask.AutoPathing.Model;
-using BetterGenshinImpact.GameTask.Model.Enum;
+using BetterGenshinImpact.Helpers.Ui;
+using BetterGenshinImpact.Model;
 using BetterGenshinImpact.Service.Interface;
 using BetterGenshinImpact.View.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using Wpf.Ui.Controls;
+using System.Threading.Tasks;
+using BetterGenshinImpact.Core.Script;
+using BetterGenshinImpact.ViewModel.Message;
+using CommunityToolkit.Mvvm.Messaging;
 using Wpf.Ui.Violeta.Controls;
+using BetterGenshinImpact.View.Pages.View;
+using BetterGenshinImpact.ViewModel.Pages.View;
+using Wpf.Ui.Violeta.Win32;
 
 namespace BetterGenshinImpact.ViewModel.Pages;
 
-public partial class MapPathingViewModel(IScriptService scriptService) : ObservableObject, INavigationAware, IViewModel
+public partial class MapPathingViewModel : ViewModel
 {
     private readonly ILogger<MapPathingViewModel> _logger = App.GetLogger<MapPathingViewModel>();
     public static readonly string PathJsonPath = Global.Absolute(@"User\AutoPathing");
 
     [ObservableProperty]
-    private ObservableCollection<PathingTask> _pathItems = [];
+    private ObservableCollection<FileTreeNode<PathingTask>> _treeList = [];
+
+    [ObservableProperty]
+    private FileTreeNode<PathingTask>? _selectNode;
 
     private MapViewer? _mapViewer;
+    private readonly IScriptService _scriptService;
+
+    public AllConfig Config { get; set; }
+
+    /// <inheritdoc/>
+    public MapPathingViewModel(IScriptService scriptService, IConfigService configService)
+    {
+        _scriptService = scriptService;
+        Config = configService.Get();
+        WeakReferenceMessenger.Default.Register<RefreshDataMessage>(this, (r, m) => InitScriptListViewData());
+
+        IconManager.CacheExcludeExtensions = [".ico"];
+    }
 
     private void InitScriptListViewData()
     {
-        _pathItems.Clear();
-        var fileInfos = LoadScriptFolder(PathJsonPath);
-        foreach (var f in fileInfos)
+        TreeList.Clear();
+        var root = FileTreeNodeHelper.LoadDirectory<PathingTask>(PathJsonPath);
+        // 循环写入 root.Children
+        foreach (var item in root.Children)
         {
-            try
+            // 补充图标
+            if (!string.IsNullOrEmpty(item.FilePath) && File.Exists(Path.Combine(item.FilePath, "icon.ico")))
             {
-                _pathItems.Add(PathingTask.BuildFromFilePath(f.FullName));
+                item.IconFilePath = Path.Combine(item.FilePath, "icon.ico");
             }
-            catch (Exception e)
+            else
             {
-                Toast.Warning($"地图追踪任务 {f.Name} 载入失败：{e.Message}");
+                item.IconFilePath = item.FilePath;
             }
+
+            TreeList.Add(item);
         }
     }
 
-    private IEnumerable<FileInfo> LoadScriptFolder(string folder)
-    {
-        if (!Directory.Exists(folder))
-        {
-            Directory.CreateDirectory(folder);
-        }
-
-        var files = Directory.GetFiles(folder, "*.*",
-            SearchOption.AllDirectories);
-
-        return files.Select(file => new FileInfo(file)).ToList();
-    }
-
-    public void OnNavigatedTo()
+    public override void OnNavigatedTo()
     {
         InitScriptListViewData();
-    }
-
-    public void OnNavigatedFrom()
-    {
     }
 
     [RelayCommand]
@@ -78,6 +83,7 @@ public partial class MapPathingViewModel(IScriptService scriptService) : Observa
         {
             Directory.CreateDirectory(PathJsonPath);
         }
+
         Process.Start("explorer.exe", PathJsonPath);
     }
 
@@ -88,27 +94,33 @@ public partial class MapPathingViewModel(IScriptService scriptService) : Observa
         {
             return;
         }
+
         Process.Start("explorer.exe", item.ProjectPath);
     }
 
     [RelayCommand]
-    public async void OnStart(PathingTask? item)
+    public async Task OnStart()
     {
+        var item = SelectNode;
         if (item == null)
         {
             return;
         }
 
-        // new TaskRunner(DispatcherTimerOperationEnum.UseCacheImageWithTriggerEmpty)
-        // .FireAndForget(async () =>
-        // {
-        //     TaskTriggerDispatcher.Instance().AddTrigger("AutoPick", null);
-        //     await new PathExecutor(CancellationContext.Instance.Cts).Pathing(item);
-        // });
+        if (item.IsDirectory)
+        {
+            Toast.Warning("执行多个地图追踪任务的时候，请使用调度器功能");
+            return;
+        }
 
-        var fileInfo = new FileInfo(item.FullPath);
+        if (string.IsNullOrEmpty(item.FilePath))
+        {
+            return;
+        }
+
+        var fileInfo = new FileInfo(item.FilePath);
         var project = ScriptGroupProject.BuildPathingProject(fileInfo.Name, fileInfo.DirectoryName!);
-        await scriptService.RunMulti([project]);
+        await _scriptService.RunMulti([project]);
     }
 
     [RelayCommand]
@@ -133,14 +145,38 @@ public partial class MapPathingViewModel(IScriptService scriptService) : Observa
     }
 
     [RelayCommand]
-    public void OnGoToPathingUrl()
+    public async void OnOpenSettings()
     {
-        Process.Start(new ProcessStartInfo("https://bgi.huiyadan.com/autos/pathing.html") { UseShellExecute = true });
+        // var uiMessageBox = new Wpf.Ui.Controls.MessageBox
+        // {
+        //     Content = view,
+        //     Title = "地图追踪配置",
+        //     CloseButtonText = "关闭"
+        // };
+        //
+        // await uiMessageBox.ShowDialogAsync();
+
+        var vm = App.GetService<PathingConfigViewModel>();
+        var view = new PathingConfigView(vm);
+        view?.ShowDialog();
     }
 
     [RelayCommand]
-    public void OnRefresh(PathingTask? item)
+    public void OnGoToPathingUrl()
+    {
+        Process.Start(new ProcessStartInfo("https://bettergi.com/feats/autos/pathing.html") { UseShellExecute = true });
+    }
+
+    [RelayCommand]
+    public void OnRefresh()
     {
         InitScriptListViewData();
+    }
+
+    [RelayCommand]
+    public void OnOpenLocalScriptRepo()
+    {
+        Config.ScriptConfig.ScriptRepoHintDotVisible = false;
+        ScriptRepoUpdater.Instance.OpenLocalRepoInWebView();
     }
 }

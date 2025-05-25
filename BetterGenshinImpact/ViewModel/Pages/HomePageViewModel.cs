@@ -7,6 +7,7 @@ using BetterGenshinImpact.Genshin.Paths;
 using BetterGenshinImpact.Helpers;
 using BetterGenshinImpact.Service.Interface;
 using BetterGenshinImpact.View;
+using BetterGenshinImpact.View.Controls.Webview;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
@@ -14,22 +15,36 @@ using CommunityToolkit.Mvvm.Messaging.Messages;
 using Fischless.GameCapture;
 using Microsoft.Extensions.Logging;
 using System;
+using System.Collections.Frozen;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
+using System.Net;
+using System.Reflection;
+using System.Text;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Interop;
 using Windows.System;
+using BetterGenshinImpact.GameTask.AutoFishing;
+using BetterGenshinImpact.Helpers.Extensions;
+using BetterGenshinImpact.Model;
 using Wpf.Ui.Controls;
 
 namespace BetterGenshinImpact.ViewModel.Pages;
 
-public partial class HomePageViewModel : ObservableObject, INavigationAware, IViewModel
+public partial class HomePageViewModel : ViewModel
 {
-    [ObservableProperty] private string[] _modeNames = GameCaptureFactory.ModeNames();
 
-    [ObservableProperty] private string? _selectedMode = CaptureModes.BitBlt.ToString();
+    [ObservableProperty]
+    private IEnumerable<EnumItem<CaptureModes>> _modeNames = EnumExtensions.ToEnumItems<CaptureModes>();
 
-    [ObservableProperty] private bool _taskDispatcherEnabled = false;
+    [ObservableProperty]
+    private string? _selectedMode = CaptureModes.BitBlt.ToString();
+
+    [ObservableProperty]
+    private bool _taskDispatcherEnabled = false;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartTriggerCommand))]
@@ -59,11 +74,14 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
         Config = configService.Get();
         ReadGameInstallPath();
 
+
         // WindowsGraphicsCapture 只支持 Win10 18362 及以上的版本 (Windows 10 version 1903 or later)
         // https://github.com/babalae/better-genshin-impact/issues/394
         if (!OsVersionHelper.IsWindows10_1903_OrGreater)
         {
-            _modeNames = _modeNames.Where(x => x != CaptureModes.WindowsGraphicsCapture.ToString()).ToArray();
+            // 删除 _modeNames 中的 CaptureModes.WindowsGraphicsCapture
+            _modeNames = _modeNames.Where(x => x.EnumName != CaptureModes.WindowsGraphicsCapture.ToString()).ToList();
+
             // DirectML 是在 Windows 10 版本 1903 和 Windows SDK 的相应版本中引入的。
             // https://learn.microsoft.com/zh-cn/windows/ai/directml/dml
             _inferenceDeviceTypes = _inferenceDeviceTypes.Where(x => x != "GPU_DirectML").ToArray();
@@ -87,21 +105,37 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
                 }
             }
         });
-
-        var args = Environment.GetCommandLineArgs();
-        if (args.Length > 1)
-        {
-            if (args[1].Contains("start"))
-            {
-                _ = OnStartTriggerAsync();
-            }
-        }
     }
 
     [RelayCommand]
     private void OnLoaded()
     {
         // OnTest();
+
+        var args = Environment.GetCommandLineArgs();
+
+        // url protocol
+        // BetterGI.dll bettergi://start/
+        if (args.Length > 1)
+        {
+            if (args[1].Contains("startOneDragon"))
+            {
+                var odVm = App.GetService<OneDragonFlowViewModel>();
+                odVm?.OneKeyExecuteCommand.Execute(null);
+            }
+            else if (args[1].Trim().Equals("--startGroups", StringComparison.InvariantCultureIgnoreCase) ||
+                     args.Length > 3)
+            {
+                var names = args.Skip(2).ToArray().Select(x => x.Trim()).ToArray();
+                // 启动调度器
+                var scheduler = App.GetService<ScriptControlViewModel>();
+                scheduler?.OnStartMultiScriptGroupWithNamesAsync(names);
+            }
+            else if (args[1].Contains("start"))
+            {
+                _ = OnStartTriggerAsync();
+            }
+        }
     }
 
     private void OnClosed()
@@ -132,12 +166,19 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
     private void OnStartCaptureTest()
     {
         var picker = new PickerWindow();
-        var hWnd = picker.PickCaptureTarget(new WindowInteropHelper(UIDispatcherHelper.MainWindow).Handle);
-        if (hWnd != IntPtr.Zero)
+
+        if (picker.PickCaptureTarget(new WindowInteropHelper(UIDispatcherHelper.MainWindow).Handle, out var hWnd))
         {
-            var captureWindow = new CaptureTestWindow();
-            captureWindow.StartCapture(hWnd, Config.CaptureMode.ToCaptureMode());
-            captureWindow.Show();
+            if (hWnd != IntPtr.Zero)
+            {
+                var captureWindow = new CaptureTestWindow();
+                captureWindow.StartCapture(hWnd, Config.CaptureMode.ToCaptureMode());
+                captureWindow.Show();
+            }
+            else
+            {
+                MessageBox.Error("选择的窗体句柄为空");
+            }
         }
     }
 
@@ -145,15 +186,17 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
     private void OnManualPickWindow()
     {
         var picker = new PickerWindow();
-        var hWnd = picker.PickCaptureTarget(new WindowInteropHelper(UIDispatcherHelper.MainWindow).Handle);
-        if (hWnd != IntPtr.Zero)
+        if (picker.PickCaptureTarget(new WindowInteropHelper(UIDispatcherHelper.MainWindow).Handle, out var hWnd))
         {
-            _hWnd = hWnd;
-            Start(hWnd);
-        }
-        else
-        {
-            MessageBox.Error("选择的窗体句柄为空！");
+            if (hWnd != IntPtr.Zero)
+            {
+                _hWnd = hWnd;
+                Start(hWnd);
+            }
+            else
+            {
+                MessageBox.Error("选择的窗体句柄为空！");
+            }
         }
     }
 
@@ -174,8 +217,14 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
         var hWnd = SystemControl.FindGenshinImpactHandle();
         if (hWnd == IntPtr.Zero)
         {
-            if (Config.GenshinStartConfig.LinkedStartEnabled && !string.IsNullOrEmpty(Config.GenshinStartConfig.InstallPath))
+            if (Config.GenshinStartConfig.LinkedStartEnabled)
             {
+                if (string.IsNullOrEmpty(Config.GenshinStartConfig.InstallPath))
+                {
+                    MessageBox.Error("没有找到原神的安装路径");
+                    return;
+                }
+
                 hWnd = await SystemControl.StartFromLocalAsync(Config.GenshinStartConfig.InstallPath);
                 if (hWnd != IntPtr.Zero)
                 {
@@ -185,7 +234,7 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
 
             if (hWnd == IntPtr.Zero)
             {
-                MessageBox.Error("未找到原神窗口，请先启动原神！");
+                await MessageBox.ErrorAsync("未找到原神窗口，请先启动原神！");
                 return;
             }
         }
@@ -195,18 +244,42 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
 
     private void Start(IntPtr hWnd)
     {
-        if (!TaskDispatcherEnabled)
+        Debug.WriteLine($"原神启动句柄{hWnd}");
+        lock (this)
         {
-            _hWnd = hWnd;
-            _taskDispatcher.Start(hWnd, Config.CaptureMode.ToCaptureMode(), Config.TriggerInterval);
-            _taskDispatcher.UiTaskStopTickEvent -= OnUiTaskStopTick;
-            _taskDispatcher.UiTaskStartTickEvent -= OnUiTaskStartTick;
-            _taskDispatcher.UiTaskStopTickEvent += OnUiTaskStopTick;
-            _taskDispatcher.UiTaskStartTickEvent += OnUiTaskStartTick;
-            _maskWindow ??= new MaskWindow();
-            _maskWindow.Show();
-            _mouseKeyMonitor.Subscribe(hWnd);
-            TaskDispatcherEnabled = true;
+            if (Config.TriggerInterval <= 0)
+            {
+                MessageBox.Error("触发器触发频率必须大于0");
+                return;
+            }
+
+            if (!TaskDispatcherEnabled)
+            {
+                _hWnd = hWnd;
+                _taskDispatcher.Start(hWnd, GetCaptureMode(), Config.TriggerInterval);
+                _taskDispatcher.UiTaskStopTickEvent -= OnUiTaskStopTick;
+                _taskDispatcher.UiTaskStartTickEvent -= OnUiTaskStartTick;
+                _taskDispatcher.UiTaskStopTickEvent += OnUiTaskStopTick;
+                _taskDispatcher.UiTaskStartTickEvent += OnUiTaskStartTick;
+                _maskWindow ??= new MaskWindow();
+                _maskWindow.Show();
+                MaskWindow.Instance().RefreshPosition();
+                _mouseKeyMonitor.Subscribe(hWnd);
+                TaskDispatcherEnabled = true;
+            }
+        }
+    }
+
+    private CaptureModes GetCaptureMode()
+    {
+        try
+        {
+            return Config.CaptureMode.ToCaptureMode();
+        }
+        catch (Exception e)
+        {
+            TaskContext.Instance().Config.CaptureMode = CaptureModes.BitBlt.ToString();
+            return CaptureModes.BitBlt;
         }
     }
 
@@ -220,21 +293,26 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
 
     private void Stop()
     {
-        if (TaskDispatcherEnabled)
+        lock (this)
         {
-            CancellationContext.Instance.Cancel(); // 取消独立任务的运行
-            _taskDispatcher.Stop();
-            if (_maskWindow != null && _maskWindow.IsExist())
+            if (TaskDispatcherEnabled)
             {
-                _maskWindow?.Hide();
+                CancellationContext.Instance.Cancel(); // 取消独立任务的运行
+                _taskDispatcher.Stop();
+                if (_maskWindow != null && _maskWindow.IsExist())
+                {
+                    _maskWindow?.Hide();
+                }
+                else
+                {
+                    _maskWindow?.Close();
+                    _maskWindow = null;
+                }
+
+                TaskDispatcherEnabled = false;
+                _mouseKeyMonitor.Unsubscribe();
+                TaskContext.Instance().IsInitialized = false;
             }
-            else
-            {
-                _maskWindow?.Close();
-                _maskWindow = null;
-            }
-            TaskDispatcherEnabled = false;
-            _mouseKeyMonitor.Unsubscribe();
         }
     }
 
@@ -248,18 +326,10 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
         UIDispatcherHelper.Invoke(() => Start(_hWnd));
     }
 
-    public void OnNavigatedTo()
-    {
-    }
-
-    public void OnNavigatedFrom()
-    {
-    }
-
     [RelayCommand]
     public void OnGoToWikiUrl()
     {
-        Process.Start(new ProcessStartInfo("https://bgi.huiyadan.com/doc.html") { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo("https://bettergi.com/doc.html") { UseShellExecute = true });
     }
 
     [RelayCommand]
@@ -327,11 +397,44 @@ public partial class HomePageViewModel : ObservableObject, INavigationAware, IVi
         // 检查用户是否配置了原神安装目录，如果没有，尝试从注册表中读取
         if (string.IsNullOrEmpty(Config.GenshinStartConfig.InstallPath))
         {
-            var path = GameExePath.GetWithoutCloud();
-            if (!string.IsNullOrEmpty(path))
+            Task.Run(async () =>
             {
-                Config.GenshinStartConfig.InstallPath = path;
-            }
+                var p1 = RegistryGameLocator.GetDefaultGameInstallPath();
+                if (!string.IsNullOrEmpty(p1))
+                {
+                    Config.GenshinStartConfig.InstallPath = p1;
+                }
+                else
+                {
+                    var p2 = await UnityLogGameLocator.LocateSingleGamePathAsync();
+                    if (!string.IsNullOrEmpty(p2))
+                    {
+                        Config.GenshinStartConfig.InstallPath = p2;
+                    }
+                }
+            });
         }
+    }
+
+    [RelayCommand]
+    private void OnOpenGameCommandLineDocument()
+    {
+        string md = ResourceHelper.GetString($"pack://application:,,,/Assets/Strings/gicli.md", Encoding.UTF8);
+
+        md = WebUtility.HtmlEncode(md);
+        string md2html = ResourceHelper.GetString($"pack://application:,,,/Assets/Strings/md2html.html", Encoding.UTF8);
+        var html = md2html.Replace("{{content}}", md);
+
+        WebpageWindow win = new()
+        {
+            Title = "启动参数说明",
+            Width = 800,
+            Height = 600,
+            Owner = Application.Current.MainWindow,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+
+        win.NavigateToHtml(html);
+        win.ShowDialog();
     }
 }

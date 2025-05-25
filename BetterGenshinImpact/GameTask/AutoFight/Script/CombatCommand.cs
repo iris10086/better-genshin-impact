@@ -27,60 +27,77 @@ public class CombatCommand
             Method = Method.GetEnumByCode(method);
 
             var parameters = command.Substring(startIndex + 1, endIndex - startIndex - 1);
-            Args = new List<string>(parameters.Split(',', StringSplitOptions.TrimEntries));
-            // 校验参数
-            if (Method == Method.Walk)
-            {
-                AssertUtils.IsTrue(Args.Count == 2, "walk方法必须有两个入参，第一个参数是方向，第二个参数是行走时间。例：walk(s, 0.2)");
-                var s = double.Parse(Args[1]);
-                AssertUtils.IsTrue(s > 0, "行走时间必须大于0");
-            }
-            else if (Method == Method.W || Method == Method.A || Method == Method.S || Method == Method.D)
-            {
-                AssertUtils.IsTrue(Args.Count == 1, "w/a/s/d方法必须有一个入参，代表行走时间。例：d(0.5)");
-            }
-            else if (Method == Method.MoveBy)
-            {
-                AssertUtils.IsTrue(Args.Count == 2, "moveby方法必须有两个入参，分别是x和y。例：moveby(100, 100))");
-            }
-            else if (Method == Method.KeyDown || Method == Method.KeyUp || Method == Method.KeyPress)
-            {
-                AssertUtils.IsTrue(Args.Count == 1, $"{Method.Alias[0]}方法必须有一个入参，代表按键");
-                try
-                {
-                    User32Helper.ToVk(Args[0]);
-                }
-                catch
-                {
-                    throw new ArgumentException($"{Method.Alias[0]}方法的入参必须是VirtualKeyCodes枚举中的值，当前入参 {Args[0]} 不合法");
-                }
-            }
+            Args = [..parameters.Split(',', StringSplitOptions.TrimEntries)];
         }
         else
         {
             Method = Method.GetEnumByCode(command);
+            Args = [];
+        }
+
+        // 校验参数
+        if (Method == Method.Walk)
+        {
+            AssertUtils.IsTrue(Args.Count == 2, "walk方法必须有两个入参，第一个参数是方向，第二个参数是行走时间。例：walk(s, 0.2)");
+            var s = double.Parse(Args[1]);
+            AssertUtils.IsTrue(s > 0, "行走时间必须大于0");
+        }
+        else if (Method == Method.W || Method == Method.A || Method == Method.S || Method == Method.D)
+        {
+            AssertUtils.IsTrue(Args.Count == 1, "w/a/s/d方法必须有一个入参，代表行走时间。例：d(0.5)");
+        }
+        else if (Method == Method.MoveBy)
+        {
+            AssertUtils.IsTrue(Args.Count == 2, "moveby方法必须有两个入参，分别是x和y。例：moveby(100, 100))");
+        }
+        else if (Method == Method.KeyDown || Method == Method.KeyUp || Method == Method.KeyPress)
+        {
+            AssertUtils.IsTrue(Args.Count == 1, $"{Method.Alias[0]}方法必须有一个入参，代表按键");
+            try
+            {
+                User32Helper.ToVk(Args[0]);
+            }
+            catch
+            {
+                throw new ArgumentException($"{Method.Alias[0]}方法的入参必须是VirtualKeyCodes枚举中的值，当前入参 {Args[0]} 不合法");
+            }
         }
     }
 
     public void Execute(CombatScenes combatScenes)
     {
-        var avatar = combatScenes.SelectAvatar(Name);
-        if (avatar == null)
+        Avatar? avatar;
+        if (Name == CombatScriptParser.CurrentAvatarName)
         {
-            return;
+            // 如果是当前角色，不进行角色切换
+            var avatarName = combatScenes.CurrentAvatar();
+            avatar = avatarName is not null ? combatScenes.SelectAvatar(avatarName) : combatScenes.SelectAvatar(1);
+            if (avatar == null)
+            {
+                return;
+            }
         }
-
-        // 非宏类脚本，等待切换角色成功
-        if (Method != Method.Wait
-            && Method != Method.MouseDown
-            && Method != Method.MouseUp
-            && Method != Method.Click
-            && Method != Method.MoveBy
-            && Method != Method.KeyDown
-            && Method != Method.KeyUp
-            && Method != Method.KeyPress)
+        else
         {
-            avatar.Switch();
+            // 其余情况要进行角色切换
+            avatar = combatScenes.SelectAvatar(Name);
+            if (avatar == null)
+            {
+                return;
+            }
+
+            // 非宏类脚本，等待切换角色成功
+            if (Method != Method.Wait
+                && Method != Method.MouseDown
+                && Method != Method.MouseUp
+                && Method != Method.Click
+                && Method != Method.MoveBy
+                && Method != Method.KeyDown
+                && Method != Method.KeyUp
+                && Method != Method.KeyPress)
+            {
+                avatar.Switch();
+            }
         }
 
         Execute(avatar);
@@ -91,6 +108,22 @@ public class CombatCommand
         if (Method == Method.Skill)
         {
             var hold = Args != null && Args.Contains("hold");
+            var wait = Args != null && Args.Contains("wait");
+            var fast = Args != null && Args.Contains("fast");
+            if (fast)
+            {
+                // 快速跳过e
+                if (!avatar.IsSkillReady(true))
+                {
+                    return;
+                }
+            }
+            else if (wait)
+            {
+                // 等待e结束,同步等待
+                avatar.WaitSkillCd().Wait();
+            }
+
             avatar.UseSkill(hold);
         }
         else if (Method == Method.Burst)

@@ -1,4 +1,5 @@
 ﻿using BetterGenshinImpact.Core.Simulator;
+using BetterGenshinImpact.Core.Simulator.Extensions;
 using BetterGenshinImpact.GameTask.AutoGeniusInvokation.Exception;
 using BetterGenshinImpact.GameTask.Common;
 using BetterGenshinImpact.GameTask.Model.Area;
@@ -61,7 +62,7 @@ public class QuickSereniteaPotTask
         try
         {
             // 打开背包
-            Simulation.SendInput.Keyboard.KeyPress(VK.VK_B);
+            Simulation.SendInput.SimulateAction(GIActions.OpenInventory);
             TaskControl.CheckAndSleep(500);
             WaitForBagToOpen();
 
@@ -80,7 +81,12 @@ public class QuickSereniteaPotTask
             TaskControl.CheckAndSleep(800);
 
             // 按F进入
-            Simulation.SendInput.Keyboard.KeyPress(VK.VK_F);
+            Simulation.SendInput.SimulateAction(GIActions.PickUpOrInteract);
+            TaskControl.CheckAndSleep(200);
+            
+            // 点击进入尘歌壶
+            // 如果不是联机状态，此时玩家应已进入传送界面，本次点击不会影响实际功能
+            GameCaptureRegion.GameRegion1080PPosClick(1010, 760);
         }
         catch (Exception e)
         {

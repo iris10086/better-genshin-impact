@@ -1,14 +1,14 @@
 ﻿using System.Windows.Controls;
+using BetterGenshinImpact.Core.Script.Group;
+using BetterGenshinImpact.ViewModel.Windows.Editable;
 
 namespace BetterGenshinImpact.View.Windows.Editable;
 
-/// <summary>
-/// ScriptGroupProjectEditor.xaml 的交互逻辑
-/// </summary>
 public partial class ScriptGroupProjectEditor : UserControl
 {
-    public ScriptGroupProjectEditor()
+    public ScriptGroupProjectEditor(ScriptGroupProject project)
     {
         InitializeComponent();
+        DataContext = new ScriptGroupProjectEditorViewModel(project);
     }
 }

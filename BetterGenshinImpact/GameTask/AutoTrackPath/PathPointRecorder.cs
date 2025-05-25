@@ -4,7 +4,7 @@ using BetterGenshinImpact.GameTask.AutoGeniusInvokation.Exception;
 using BetterGenshinImpact.GameTask.AutoTrackPath.Model;
 using BetterGenshinImpact.GameTask.Common.Element.Assets;
 using BetterGenshinImpact.GameTask.Common.Map;
-using BetterGenshinImpact.GameTask.Model.Enum;
+
 using BetterGenshinImpact.Helpers.Extensions;
 using BetterGenshinImpact.Model;
 using BetterGenshinImpact.Service;
@@ -34,16 +34,12 @@ public class PathPointRecorder : Singleton<PathPointRecorder>
         {
             if (_recordTask == null)
             {
-                TaskTriggerDispatcher.Instance().SetCacheCaptureMode(DispatcherCaptureModeEnum.OnlyCacheCapture);
-
                 _recordTaskCts = new CancellationTokenSource();
-                _recordTask = RecordTask(_recordTaskCts);
+                _recordTask = RecordTask(_recordTaskCts.Token);
                 _recordTask.Start();
             }
             else
             {
-                TaskTriggerDispatcher.Instance().SetCacheCaptureMode(DispatcherCaptureModeEnum.NormalTrigger);
-
                 _recordTaskCts?.Cancel();
                 _recordTask = null;
             }
@@ -58,17 +54,17 @@ public class PathPointRecorder : Singleton<PathPointRecorder>
         }
     }
 
-    public Task RecordTask(CancellationTokenSource cts)
+    public Task RecordTask(CancellationToken ct)
     {
         return new Task(() =>
         {
             GiPath way = new();
 
-            while (!cts.Token.IsCancellationRequested)
+            while (!ct.IsCancellationRequested)
             {
                 try
                 {
-                    Sleep(10, cts);
+                    Sleep(10, ct);
                     var ra = CaptureToRectArea();
 
                     // 小地图匹配
@@ -76,7 +72,7 @@ public class PathPointRecorder : Singleton<PathPointRecorder>
                     var p = MatchTemplateHelper.MatchTemplate(ra.SrcGreyMat, tar, TemplateMatchModes.CCoeffNormed, null, 0.9);
                     if (p.X == 0 || p.Y == 0)
                     {
-                        Sleep(50, cts);
+                        Sleep(50, ct);
                         continue;
                     }
 
@@ -88,7 +84,7 @@ public class PathPointRecorder : Singleton<PathPointRecorder>
                     }
                     else
                     {
-                        Sleep(50, cts);
+                        Sleep(50, ct);
                     }
                 }
                 catch (Exception e)
@@ -100,6 +96,6 @@ public class PathPointRecorder : Singleton<PathPointRecorder>
             File.WriteAllText(Global.Absolute($@"log\way\{DateTime.Now:yyyy-MM-dd HH：mm：ss：ffff}.json"), JsonSerializer.Serialize(way, ConfigService.JsonOptions));
 #endif
             Logger.LogInformation("路线录制结束");
-        }, cts.Token);
+        }, ct);
     }
 }

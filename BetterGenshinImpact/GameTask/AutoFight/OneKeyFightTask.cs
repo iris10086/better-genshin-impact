@@ -1,14 +1,12 @@
 ﻿using BetterGenshinImpact.Core.Config;
 using BetterGenshinImpact.GameTask.AutoFight.Model;
 using BetterGenshinImpact.GameTask.AutoFight.Script;
-using BetterGenshinImpact.GameTask.Model.Enum;
 using BetterGenshinImpact.Model;
 using BetterGenshinImpact.Service;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -40,8 +38,10 @@ public class OneKeyFightTask : Singleton<OneKeyFightTask>
         {
             return;
         }
+
         _isKeyDown = true;
-        if (activeMacroPriority != TaskContext.Instance().Config.MacroConfig.CombatMacroPriority || IsAvatarMacrosEdited())
+        if (activeMacroPriority != TaskContext.Instance().Config.MacroConfig.CombatMacroPriority ||
+            IsAvatarMacrosEdited())
         {
             activeMacroPriority = TaskContext.Instance().Config.MacroConfig.CombatMacroPriority;
             _avatarMacros = LoadAvatarMacros();
@@ -53,7 +53,7 @@ public class OneKeyFightTask : Singleton<OneKeyFightTask>
             if (_cts == null || _cts.Token.IsCancellationRequested)
             {
                 _cts = new CancellationTokenSource();
-                _fightTask = FightTask(_cts);
+                _fightTask = FightTask(_cts.Token);
                 if (!_fightTask.IsCompleted)
                 {
                     _fightTask.Start();
@@ -65,7 +65,7 @@ public class OneKeyFightTask : Singleton<OneKeyFightTask>
             if (_cts == null || _cts.Token.IsCancellationRequested)
             {
                 _cts = new CancellationTokenSource();
-                _fightTask = FightTask(_cts);
+                _fightTask = FightTask(_cts.Token);
                 if (!_fightTask.IsCompleted)
                 {
                     _fightTask.Start();
@@ -126,16 +126,8 @@ public class OneKeyFightTask : Singleton<OneKeyFightTask>
     /// <summary>
     /// 循环执行战斗宏
     /// </summary>
-    private Task FightTask(CancellationTokenSource cts)
+    private Task FightTask(CancellationToken ct)
     {
-        // 切换截图模式
-        var dispatcherCaptureMode = TaskTriggerDispatcher.Instance().GetCacheCaptureMode();
-        if (dispatcherCaptureMode != DispatcherCaptureModeEnum.CacheCaptureWithTrigger)
-        {
-            TaskTriggerDispatcher.Instance().SetCacheCaptureMode(DispatcherCaptureModeEnum.CacheCaptureWithTrigger);
-            Sleep(TaskContext.Instance().Config.TriggerInterval * 2, cts); // 等待缓存图像
-        }
-
         var imageRegion = CaptureToRectArea();
         var combatScenes = new CombatScenes().InitializeTeam(imageRegion);
         if (!combatScenes.CheckTeamInitialized())
@@ -154,15 +146,29 @@ public class OneKeyFightTask : Singleton<OneKeyFightTask>
         {
             _currentCombatScenes = combatScenes;
         }
+
         // 找到出战角色
-        var activeAvatar = _currentCombatScenes.Avatars.First(avatar => avatar.IsActive(imageRegion));
+        // var activeAvatar = _currentCombatScenes.GetAvatars().First(avatar => avatar.IsActive(imageRegion));
+        var avatarName = _currentCombatScenes.CurrentAvatar(true, imageRegion, ct);
+        if (avatarName is null)
+        {
+            Logger.LogError("无法识别出战角色");
+            return Task.CompletedTask;
+        }
+
+        var activeAvatar = _currentCombatScenes.SelectAvatar(avatarName);
+        if (activeAvatar is null)
+        {
+            Logger.LogError("获取出战角色{Name}失败", avatarName);
+            return Task.CompletedTask;
+        }
 
         if (_avatarMacros != null && _avatarMacros.TryGetValue(activeAvatar.Name, out var combatCommands))
         {
             return new Task(() =>
             {
                 Logger.LogInformation("→ {Name}执行宏", activeAvatar.Name);
-                while (!cts.Token.IsCancellationRequested && IsEnabled())
+                while (!ct.IsCancellationRequested && IsEnabled())
                 {
                     if (IsHoldOnMode() && !_isKeyDown)
                     {
@@ -175,6 +181,7 @@ public class OneKeyFightTask : Singleton<OneKeyFightTask>
                         command.Execute(activeAvatar);
                     }
                 }
+
                 Logger.LogInformation("→ {Name}停止宏", activeAvatar.Name);
             });
         }
@@ -195,6 +202,7 @@ public class OneKeyFightTask : Singleton<OneKeyFightTask>
         {
             return [];
         }
+
         var result = new Dictionary<string, List<CombatCommand>>();
         foreach (var avatarMacro in avatarMacros)
         {
@@ -204,6 +212,7 @@ public class OneKeyFightTask : Singleton<OneKeyFightTask>
                 result.Add(avatarMacro.Name, commands);
             }
         }
+
         return result;
     }
 

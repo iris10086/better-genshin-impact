@@ -4,6 +4,7 @@ using Microsoft.Web.WebView2.Wpf;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Security.AccessControl;
 using System.Text;
 using System.Threading;
 using System.Windows;
@@ -21,6 +22,8 @@ public class WebpagePanel : UserControl
 
     public string? DownloadFolderPath { get; set; }
 
+    public Action? OnWebViewInitializedAction { get; set; }
+
     public WebpagePanel()
     {
         if (!IsWebView2Available())
@@ -29,12 +32,15 @@ public class WebpagePanel : UserControl
         }
         else
         {
+            EnsureWebView2DataFolder();
             _webView = new WebView2()
             {
                 CreationProperties = new CoreWebView2CreationProperties
                 {
                     UserDataFolder = Path.Combine(new FileInfo(Environment.ProcessPath!).DirectoryName!, @"WebView2Data\\"),
-                    AdditionalBrowserArguments = "--enable-features=WebContentsForceDark"
+
+                    // TODO: change the theme from `md2html.html` to fit it firstly.
+                    // AdditionalBrowserArguments = "--enable-features=WebContentsForceDark"
                 }
             };
             _webView.CoreWebView2InitializationCompleted += WebView_CoreWebView2InitializationCompleted;
@@ -52,6 +58,8 @@ public class WebpagePanel : UserControl
             {
                 WebView.CoreWebView2.Profile.DefaultDownloadFolderPath = DownloadFolderPath;
             }
+            // 调用外部设置的 Action
+            OnWebViewInitializedAction?.Invoke();
         }
         else
         {
@@ -114,17 +122,38 @@ public class WebpagePanel : UserControl
         _currentUri = _webView.Source;
     }
 
-    public void NavigateToHtml(string html)
+    public void NavigateToHtml(string htmlContentOrUrl)
     {
         _webView?.EnsureCoreWebView2Async()
             .ContinueWith(_ => SpinWait.SpinUntil(() => _initialized))
-            .ContinueWith(_ => Dispatcher.Invoke(() => _webView?.NavigateToString(html)));
+            .ContinueWith(_ => Dispatcher.Invoke(() => 
+            {
+                // 检查是否是URL（以file:或http开头）
+                if (htmlContentOrUrl.StartsWith("file:") || htmlContentOrUrl.StartsWith("http"))
+                {
+                    // 如果是URL，使用Navigate方法
+                    _webView?.CoreWebView2?.Navigate(htmlContentOrUrl);
+                    _currentUri = new Uri(htmlContentOrUrl);
+                }
+                else
+                {
+                    // 如果是HTML内容，使用NavigateToString方法
+                    _webView?.NavigateToString(htmlContentOrUrl);
+                }
+            }));
     }
 
     private void NavigationStarting_CancelNavigation(object? sender, CoreWebView2NavigationStartingEventArgs e)
     {
         if (e.Uri.StartsWith("data:")) // when using NavigateToString
             return;
+            
+        // 允许file:和http:开头的URL导航（用于大型HTML内容）
+        if (e.Uri.StartsWith("file:") || e.Uri.StartsWith("http:") || e.Uri.StartsWith("https:"))
+        {
+            if (_currentUri != null && e.Uri == _currentUri.ToString())
+                return;
+        }
 
         var newUri = new Uri(e.Uri);
         if (newUri != _currentUri) e.Cancel = true;
@@ -149,4 +178,19 @@ public class WebpagePanel : UserControl
 
         return button;
     }
+
+    private void EnsureWebView2DataFolder()
+    {
+        try
+        {
+            string folder = Path.Combine(new FileInfo(Environment.ProcessPath!).DirectoryName!, @"WebView2Data\\");
+            Directory.CreateDirectory(folder);
+            DirectoryInfo info = new DirectoryInfo(folder);
+            DirectorySecurity access = info.GetAccessControl();
+            access.AddAccessRule(new FileSystemAccessRule("Everyone", FileSystemRights.FullControl, AccessControlType.Allow));
+            info.SetAccessControl(access);
+        }
+        catch { }
+    }
+
 }

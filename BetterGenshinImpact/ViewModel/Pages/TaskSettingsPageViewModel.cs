@@ -14,19 +14,29 @@ using BetterGenshinImpact.View.Pages;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
-using System.Diagnostics;
+using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.System;
-using BetterGenshinImpact.GameTask.Model.Enum;
+using BetterGenshinImpact.GameTask.AutoFishing;
+using BetterGenshinImpact.GameTask.Common.Element.Assets;
+
+using BetterGenshinImpact.Helpers;
 using Wpf.Ui;
 using Wpf.Ui.Controls;
 using Wpf.Ui.Violeta.Controls;
+using BetterGenshinImpact.ViewModel.Pages.View;
+using System.Linq;
+using System.Reflection;
+using System.Collections.Frozen;
+using BetterGenshinImpact.GameTask.AutoArtifactSalvage;
+using BetterGenshinImpact.View.Windows;
 
 namespace BetterGenshinImpact.ViewModel.Pages;
 
-public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAware, IViewModel
+public partial class TaskSettingsPageViewModel : ViewModel
 {
     public AllConfig Config { get; set; }
 
@@ -36,20 +46,102 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     private CancellationTokenSource? _cts;
     private static readonly object _locker = new();
 
-    [ObservableProperty] private string[] _strategyList;
-    [ObservableProperty] private string _switchAutoGeniusInvokationButtonText = "启动";
+    // [ObservableProperty]
+    // private string[] _strategyList;
 
-    [ObservableProperty] private int _autoWoodRoundNum;
-    [ObservableProperty] private int _autoWoodDailyMaxCount = 2000;
-    [ObservableProperty] private string _switchAutoWoodButtonText = "启动";
+    [ObservableProperty]
+    private bool _switchAutoGeniusInvokationEnabled;
 
-    [ObservableProperty] private string[] _combatStrategyList;
-    [ObservableProperty] private int _autoDomainRoundNum;
-    [ObservableProperty] private string _switchAutoDomainButtonText = "启动";
-    [ObservableProperty] private string _switchAutoFightButtonText = "启动";
-    [ObservableProperty] private string _switchAutoTrackButtonText = "启动";
-    [ObservableProperty] private string _switchAutoTrackPathButtonText = "启动";
-    [ObservableProperty] private string _switchAutoMusicGameButtonText = "启动";
+    [ObservableProperty]
+    private string _switchAutoGeniusInvokationButtonText = "启动";
+
+    [ObservableProperty]
+    private int _autoWoodRoundNum;
+
+    [ObservableProperty]
+    private int _autoWoodDailyMaxCount = 2000;
+
+    [ObservableProperty]
+    private bool _switchAutoWoodEnabled;
+
+    [ObservableProperty]
+    private string _switchAutoWoodButtonText = "启动";
+
+    //[ObservableProperty]
+    //private string[] _combatStrategyList;
+
+    [ObservableProperty]
+    private int _autoDomainRoundNum;
+
+    [ObservableProperty]
+    private bool _switchAutoDomainEnabled;
+
+    [ObservableProperty]
+    private string _switchAutoDomainButtonText = "启动";
+
+    [ObservableProperty]
+    private bool _switchAutoFightEnabled;
+
+    [ObservableProperty]
+    private string _switchAutoFightButtonText = "启动";
+
+    [ObservableProperty]
+    private string _switchAutoTrackButtonText = "启动";
+
+    [ObservableProperty]
+    private string _switchAutoTrackPathButtonText = "启动";
+
+    [ObservableProperty]
+    private bool _switchAutoMusicGameEnabled;
+
+    [ObservableProperty]
+    private string _switchAutoMusicGameButtonText = "启动";
+
+    [ObservableProperty]
+    private bool _switchAutoAlbumEnabled;
+
+    [ObservableProperty]
+    private string _switchAutoAlbumButtonText = "启动";
+
+    [ObservableProperty]
+    private List<string> _domainNameList;
+
+    public static List<string> ArtifactSalvageStarList = ["4", "3", "2", "1"];
+
+    [ObservableProperty]
+    private List<string> _autoMusicLevelList = ["传说", "大师", "困难", "普通", "所有"];
+
+    [ObservableProperty]
+    private AutoFightViewModel? _autoFightViewModel;
+    
+    [ObservableProperty]
+    private OneDragonFlowViewModel? _oneDragonFlowViewModel;
+
+    [ObservableProperty]
+    private bool _switchAutoFishingEnabled;
+
+    [ObservableProperty]
+    private string _switchAutoFishingButtonText = "启动";
+
+    [ObservableProperty]
+    private FrozenDictionary<Enum, string> _fishingTimePolicyDict = Enum.GetValues(typeof(FishingTimePolicy))
+        .Cast<FishingTimePolicy>()
+        .ToFrozenDictionary(
+            e => (Enum)e,
+            e => e.GetType()
+                .GetField(e.ToString())?
+                .GetCustomAttribute<DescriptionAttribute>()?
+                .Description ?? e.ToString());
+
+    private bool saveScreenshotOnKeyTick;
+    public bool SaveScreenshotOnKeyTick
+    {
+        get => Config.CommonConfig.ScreenshotEnabled && saveScreenshotOnKeyTick;
+        set => SetProperty(ref saveScreenshotOnKeyTick, value);
+    }
+
+    [ObservableProperty]
+    private bool _switchArtifactSalvageEnabled;
 
     public TaskSettingsPageViewModel(IConfigService configService, INavigationService navigationService, TaskTriggerDispatcher taskTriggerDispatcher)
     {
@@ -57,61 +149,44 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
         _navigationService = navigationService;
         _taskDispatcher = taskTriggerDispatcher;
 
-        _strategyList = LoadCustomScript(Global.Absolute(@"User\AutoGeniusInvokation"));
+        //_strategyList = LoadCustomScript(Global.Absolute(@"User\AutoGeniusInvokation"));
 
-        _combatStrategyList = ["根据队伍自动选择", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
+        //_combatStrategyList = ["根据队伍自动选择", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
+
+        _domainNameList = ["", .. MapLazyAssets.Instance.DomainNameList];
+        _autoFightViewModel = new AutoFightViewModel(Config);
+        _oneDragonFlowViewModel = new OneDragonFlowViewModel();
     }
-
-    private string[] LoadCustomScript(string folder)
-    {
-        var files = Directory.GetFiles(folder, "*.*",
-            SearchOption.AllDirectories);
-
-        var strategyList = new string[files.Length];
-        for (var i = 0; i < files.Length; i++)
+  
+    
+    [RelayCommand]
+    private async Task OnSOneDragonFlow()
+    {   
+        if (OneDragonFlowViewModel == null || OneDragonFlowViewModel.SelectedConfig == null)
         {
-            if (files[i].EndsWith(".txt"))
-            {
-                var strategyName = files[i].Replace(folder, "").Replace(".txt", "");
-                if (strategyName.StartsWith('\\'))
-                {
-                    strategyName = strategyName[1..];
-                }
-                strategyList[i] = strategyName;
-            }
+            Toast.Warning("未设置任务!");
+            return;
         }
-
-        return strategyList;
+        OneDragonFlowViewModel.OnNavigatedTo();
+        await OneDragonFlowViewModel.OnOneKeyExecute();
     }
 
     [RelayCommand]
     private async Task OnStopSoloTask()
     {
         CancellationContext.Instance.Cancel();
+        SwitchAutoGeniusInvokationEnabled = false;
+        SwitchAutoWoodEnabled = false;
+        SwitchAutoDomainEnabled = false;
+        SwitchAutoFightEnabled = false;
+        SwitchAutoMusicGameEnabled = false;
         await Task.Delay(800);
     }
 
     [RelayCommand]
     private void OnStrategyDropDownOpened(string type)
     {
-        switch (type)
-        {
-            case "Combat":
-                CombatStrategyList = ["根据队伍自动选择", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
-                break;
-
-            case "GeniusInvocation":
-                StrategyList = LoadCustomScript(Global.Absolute(@"User\AutoGeniusInvokation"));
-                break;
-        }
-    }
-
-    public void OnNavigatedTo()
-    {
-    }
-
-    public void OnNavigatedFrom()
-    {
+        AutoFightViewModel?.OnStrategyDropDownOpened(type);
     }
 
     [RelayCommand]
@@ -123,10 +198,24 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnSwitchAutoGeniusInvokation()
     {
+        if (GetTcgStrategy(out var content))
+        {
+            return;
+        }
+
+        SwitchAutoGeniusInvokationEnabled = true;
+        await new TaskRunner()
+            .RunSoloTaskAsync(new AutoGeniusInvokationTask(new GeniusInvokationTaskParam(content)));
+        SwitchAutoGeniusInvokationEnabled = false;
+    }
+
+    public bool GetTcgStrategy(out string content)
+    {
+        content = string.Empty;
         if (string.IsNullOrEmpty(Config.AutoGeniusInvokationConfig.StrategyName))
         {
             Toast.Warning("请先选择策略");
-            return;
+            return true;
         }
 
         var path = Global.Absolute(@"User\AutoGeniusInvokation\" + Config.AutoGeniusInvokationConfig.StrategyName + ".txt");
@@ -134,32 +223,32 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
         if (!File.Exists(path))
         {
             Toast.Error("策略文件不存在");
-            return;
+            return true;
         }
 
-        var content = await File.ReadAllTextAsync(path);
-
-        await new TaskRunner(DispatcherTimerOperationEnum.UseSelfCaptureImage)
-            .RunSoloTaskAsync(new AutoGeniusInvokationTask(new GeniusInvokationTaskParam(content)));
+        content = File.ReadAllText(path);
+        return false;
     }
 
     [RelayCommand]
     public async Task OnGoToAutoGeniusInvokationUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/doc.html#%E8%87%AA%E5%8A%A8%E4%B8%83%E5%9C%A3%E5%8F%AC%E5%94%A4"));
+        await Launcher.LaunchUriAsync(new Uri("https://bettergi.com/feats/task/tcg.html"));
     }
 
     [RelayCommand]
     public async Task OnSwitchAutoWood()
     {
-        await new TaskRunner(DispatcherTimerOperationEnum.UseSelfCaptureImage)
+        SwitchAutoWoodEnabled = true;
+        await new TaskRunner()
             .RunSoloTaskAsync(new AutoWoodTask(new WoodTaskParam(AutoWoodRoundNum, AutoWoodDailyMaxCount)));
+        SwitchAutoWoodEnabled = false;
     }
 
     [RelayCommand]
     public async Task OnGoToAutoWoodUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/felling.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bettergi.com/feats/task/felling.html"));
     }
 
     [RelayCommand]
@@ -169,14 +258,19 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
         {
             return;
         }
-        await new TaskRunner(DispatcherTimerOperationEnum.UseCacheImageWithTrigger)
-            .RunSoloTaskAsync(new AutoFightTask(new AutoFightParam(path)));
+
+        var param = new AutoFightParam(path, Config.AutoFightConfig);
+
+        SwitchAutoFightEnabled = true;
+        await new TaskRunner()
+            .RunSoloTaskAsync(new AutoFightTask(param));
+        SwitchAutoFightEnabled = false;
     }
 
     [RelayCommand]
     public async Task OnGoToAutoFightUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/domain.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bettergi.com/feats/task/domain.html"));
     }
 
     [RelayCommand]
@@ -186,20 +280,31 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
         {
             return;
         }
-        await new TaskRunner(DispatcherTimerOperationEnum.UseCacheImage)
+
+        SwitchAutoDomainEnabled = true;
+        await new TaskRunner()
             .RunSoloTaskAsync(new AutoDomainTask(new AutoDomainParam(AutoDomainRoundNum, path)));
+        SwitchAutoDomainEnabled = false;
     }
 
-    private bool GetFightStrategy(out string path)
+    public bool GetFightStrategy(out string path)
     {
+        if (string.IsNullOrEmpty(Config.AutoFightConfig.StrategyName))
+        {
+            UIDispatcherHelper.Invoke(() => { Toast.Warning("请先在【独立任务——自动战斗】下拉列表配置中选择战斗策略！"); });
+            path = string.Empty;
+            return true;
+        }
+
         path = Global.Absolute(@"User\AutoFight\" + Config.AutoFightConfig.StrategyName + ".txt");
         if ("根据队伍自动选择".Equals(Config.AutoFightConfig.StrategyName))
         {
             path = Global.Absolute(@"User\AutoFight\");
         }
+
         if (!File.Exists(path) && !Directory.Exists(path))
         {
-            Toast.Error("战斗策略文件不存在");
+            UIDispatcherHelper.Invoke(() => { Toast.Error("当前选择的自动战斗策略文件不存在"); });
             return true;
         }
 
@@ -209,13 +314,13 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnGoToAutoDomainUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/domain.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bettergi.com/feats/task/domain.html"));
     }
 
     [RelayCommand]
     public void OnOpenFightFolder()
     {
-        Process.Start("explorer.exe", Global.Absolute(@"User\AutoFight\"));
+        AutoFightViewModel?.OnOpenFightFolder();
     }
 
     [Obsolete]
@@ -250,7 +355,7 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnGoToAutoTrackUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/track.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bettergi.com/feats/task/track.html"));
     }
 
     [Obsolete]
@@ -283,21 +388,75 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     }
 
     [RelayCommand]
-    public async Task OnGoToAutoTrackPathUrlAsync()
+    private async Task OnGoToAutoTrackPathUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/track.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bettergi.com/feats/task/track.html"));
     }
 
     [RelayCommand]
-    public async Task OnSwitchAutoMusicGame()
+    private async Task OnSwitchAutoMusicGame()
     {
-        await new TaskRunner(DispatcherTimerOperationEnum.UseSelfCaptureImage)
+        SwitchAutoMusicGameEnabled = true;
+        await new TaskRunner()
             .RunSoloTaskAsync(new AutoMusicGameTask(new AutoMusicGameParam()));
+        SwitchAutoMusicGameEnabled = false;
     }
 
     [RelayCommand]
-    public async Task OnGoToAutoMusicGameUrlAsync()
+    private async Task OnGoToAutoMusicGameUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/music.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bettergi.com/feats/task/music.html"));
+    }
+
+    [RelayCommand]
+    private async Task OnSwitchAutoAlbum()
+    {
+        SwitchAutoAlbumEnabled = true;
+        await new TaskRunner()
+            .RunSoloTaskAsync(new AutoAlbumTask(new AutoMusicGameParam()));
+        SwitchAutoAlbumEnabled = false;
+    }
+
+    [RelayCommand]
+    private async Task OnSwitchAutoFishing()
+    {
+        SwitchAutoFishingEnabled = true;
+        var param = AutoFishingTaskParam.BuildFromConfig(TaskContext.Instance().Config.AutoFishingConfig, SaveScreenshotOnKeyTick);
+        await new TaskRunner()
+            .RunSoloTaskAsync(new AutoFishingTask(param));
+        SwitchAutoFishingEnabled = false;
+    }
+
+    [RelayCommand]
+    private async Task OnGoToAutoFishingUrlAsync()
+    {
+        await Launcher.LaunchUriAsync(new Uri("https://bettergi.com/feats/task/fish.html"));
+    }
+
+    [RelayCommand]
+    private void OnOpenLocalScriptRepo()
+    {
+        AutoFightViewModel?.OnOpenLocalScriptRepo();
+    }
+
+    [RelayCommand]
+    private async Task OnSwitchArtifactSalvage()
+    {
+        SwitchArtifactSalvageEnabled = true;
+        await new TaskRunner()
+            .RunSoloTaskAsync(new AutoArtifactSalvageTask(int.Parse(Config.AutoArtifactSalvageConfig.MaxArtifactStar), Config.AutoArtifactSalvageConfig.RegularExpression, Config.AutoArtifactSalvageConfig.MaxNumToCheck));
+        SwitchArtifactSalvageEnabled = false;
+    }
+
+    [RelayCommand]
+    private void OnOpenArtifactSalvageTestOCRWindow()
+    {
+        if (!TaskContext.Instance().IsInitialized)
+        {
+            PromptDialog.Prompt("请先启动截图器！", "");    // todo 自动启动截图器
+            return;
+        }
+        OcrDialog ocrDialog = new OcrDialog(0.70, 0.098, 0.24, 0.52, "圣遗物分解", this.Config.AutoArtifactSalvageConfig.RegularExpression);
+        ocrDialog.ShowDialog();
     }
 }

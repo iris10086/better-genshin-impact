@@ -1,6 +1,13 @@
-﻿using BetterGenshinImpact.GameTask;
+﻿using System;
+using System.Diagnostics;
+using System.IO;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Threading;
+using BetterGenshinImpact.GameTask;
 using BetterGenshinImpact.Helpers;
 using BetterGenshinImpact.Helpers.Extensions;
+using BetterGenshinImpact.Hutao;
 using BetterGenshinImpact.Service;
 using BetterGenshinImpact.Service.Interface;
 using BetterGenshinImpact.Service.Notification;
@@ -9,18 +16,15 @@ using BetterGenshinImpact.View;
 using BetterGenshinImpact.View.Pages;
 using BetterGenshinImpact.ViewModel;
 using BetterGenshinImpact.ViewModel.Pages;
+using BetterGenshinImpact.ViewModel.Pages.View;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Serilog;
 using Serilog.Events;
 using Serilog.Sinks.RichTextBox.Abstraction;
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.Threading.Tasks;
-using System.Windows;
 using Wpf.Ui;
+using Wpf.Ui.DependencyInjection;
 using Wpf.Ui.Violeta.Controls;
 
 namespace BetterGenshinImpact;
@@ -36,6 +40,7 @@ public partial class App : Application
         .CheckIntegration()
         .UseElevated()
         .UseSingleInstance("BetterGI")
+        .ConfigureLogging(builder => { builder.ClearProviders(); })
         .ConfigureServices(
             (context, services) =>
             {
@@ -52,23 +57,30 @@ public partial class App : Application
                 services.AddSingleton<IRichTextBox>(richTextBox);
 
                 var loggerConfiguration = new LoggerConfiguration()
-                    .WriteTo.File(path: logFile, outputTemplate: "[{Timestamp:HH:mm:ss.fff}] [{Level:u3}] {SourceContext}{NewLine}{Message}{NewLine}{Exception}{NewLine}", rollingInterval: RollingInterval.Day)
+                    .WriteTo.File(logFile,
+                        outputTemplate:
+                        "[{Timestamp:HH:mm:ss.fff}] [{Level:u3}] {SourceContext}{NewLine}{Message}{NewLine}{Exception}{NewLine}",
+                        rollingInterval: RollingInterval.Day)
                     .MinimumLevel.Debug()
                     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
                     .MinimumLevel.Override("Microsoft.Hosting.Lifetime", LogEventLevel.Warning);
                 if (all.MaskWindowConfig.MaskEnabled)
                 {
-                    loggerConfiguration.WriteTo.RichTextBox(richTextBox, LogEventLevel.Information, outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}");
+                    loggerConfiguration.WriteTo.RichTextBox(richTextBox, LogEventLevel.Information,
+                        "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}");
                 }
 
                 Log.Logger = loggerConfiguration.CreateLogger();
                 services.AddLogging(c => c.AddSerilog());
 
+                services.AddLocalization();
+
+                services.AddNavigationViewPageProvider();
                 // App Host
                 services.AddHostedService<ApplicationHostService>();
-
                 // Page resolver service
-                services.AddSingleton<IPageService, PageService>();
+                services.AddSingleton<INavigationService, NavigationService>();
+                services.AddSingleton<IUpdateService, UpdateService>();
 
                 // Service containing navigation, same as INavigationWindow... but without window
                 services.AddSingleton<INavigationService, NavigationService>();
@@ -90,6 +102,21 @@ public partial class App : Application
                 services.AddView<KeyMouseRecordPage, KeyMouseRecordPageViewModel>();
                 services.AddView<JsListPage, JsListViewModel>();
                 services.AddView<MapPathingPage, MapPathingViewModel>();
+                services.AddView<OneDragonFlowPage, OneDragonFlowViewModel>();
+                services.AddSingleton<PathingConfigViewModel>();
+                // services.AddView<PathingConfigView, PathingConfigViewModel>();
+                services.AddView<KeyBindingsSettingsPage, KeyBindingsSettingsPageViewModel>();
+
+                // 一条龙 ViewModels
+                // services.AddSingleton<CraftViewModel>();
+                // services.AddSingleton<DailyCommissionViewModel>();
+                // services.AddSingleton<DailyRewardViewModel>();
+                // services.AddSingleton<DomainViewModel>();
+                // services.AddSingleton<ForgingViewModel>();
+                // services.AddSingleton<LeyLineBlossomViewModel>();
+                // services.AddSingleton<MailViewModel>();
+                // services.AddSingleton<SereniteaPotViewModel>();
+                // services.AddSingleton<TcgViewModel>();
 
                 // My Services
                 services.AddSingleton<TaskTriggerDispatcher>();
@@ -97,6 +124,7 @@ public partial class App : Application
                 services.AddHostedService(sp => sp.GetRequiredService<NotificationService>());
                 services.AddSingleton<NotifierManager>();
                 services.AddSingleton<IScriptService, ScriptService>();
+                services.AddSingleton<HutaoNamedPipe>();
 
                 // Configuration
                 //services.Configure<AppConfig>(context.Configuration.GetSection(nameof(AppConfig)));
@@ -161,6 +189,8 @@ public partial class App : Application
     {
         base.OnExit(e);
 
+        TempManager.CleanUp();
+
         await _host.StopAsync();
         _host.Dispose();
     }
@@ -217,7 +247,7 @@ public partial class App : Application
     }
 
     //UI线程未捕获异常处理事件（UI主线程）
-    private static void AppDispatcherUnhandledException(object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    private static void AppDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         try
         {
@@ -250,12 +280,12 @@ public partial class App : Application
             // Fallback.
             System.Windows.Forms.MessageBox.Show(
                 $"""
-                程序异常：{e.Source}
-                --
-                {e.StackTrace}
-                --
-                {e.Message}
-                """
+                 程序异常：{e.Source}
+                 --
+                 {e.StackTrace}
+                 --
+                 {e.Message}
+                 """
             );
         }
 

@@ -3,7 +3,6 @@
                  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
                  xmlns:b="http://schemas.microsoft.com/xaml/behaviors"
                  xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-                 xmlns:helpers="clr-namespace:BetterGenshinImpact.Helpers"
                  xmlns:markup="clr-namespace:BetterGenshinImpact.Markup"
                  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
                  xmlns:pages="clr-namespace:BetterGenshinImpact.View.Pages"
@@ -20,6 +19,7 @@
                  ExtendsContentIntoTitleBar="True"
                  FontFamily="{StaticResource TextThemeFontFamily}"
                  Visibility="{Binding IsVisible, Mode=TwoWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                 WindowBackdropType="Auto"
                  WindowStartupLocation="CenterScreen"
                  WindowState="{Binding WindowState, Mode=TwoWay}"
                  mc:Ignorable="d">
@@ -27,6 +27,9 @@
         <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
     </Window.Resources>
     <b:Interaction.Triggers>
+        <b:EventTrigger EventName="Activated">
+            <b:InvokeCommandAction Command="{Binding ActivatedCommand}" />
+        </b:EventTrigger>
         <b:EventTrigger EventName="Loaded">
             <b:InvokeCommandAction Command="{Binding LoadedCommand}" CommandParameter="{Binding}" />
         </b:EventTrigger>
@@ -69,14 +72,16 @@
                         <ui:SymbolIcon Symbol="TaskListSquareLtr24" />
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <ui:NavigationViewItem Content="辅助操控"
+
+                <!--<ui:NavigationViewItemSeparator />-->
+
+                <ui:NavigationViewItem Content="一条龙"
                                        NavigationCacheMode="Enabled"
-                                       TargetPageType="{x:Type pages:MacroSettingsPage}">
+                                       TargetPageType="{x:Type pages:OneDragonFlowPage}">
                     <ui:NavigationViewItem.Icon>
-                        <ui:SymbolIcon Symbol="XboxController24" />
+                        <ui:SymbolIcon Symbol="AnimalTurtle24" />
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
-                <!--<ui:NavigationViewItemSeparator />-->
 
                 <ui:NavigationViewItem Content="全自动">
                     <ui:NavigationViewItem.Icon>
@@ -94,7 +99,7 @@
                             </ui:NavigationViewItem.Icon>
                         </ui:NavigationViewItem>
                         <!--  WebAsset24 | DocumentJs16 | Script16  -->
-                        <ui:NavigationViewItem Content="脚本"
+                        <ui:NavigationViewItem Content="JS 脚本"
                                                NavigationCacheMode="Enabled"
                                                TargetPageType="{x:Type pages:JsListPage}">
                             <ui:NavigationViewItem.Icon>
@@ -120,6 +125,14 @@
                     </ui:NavigationViewItem.MenuItems>
                 </ui:NavigationViewItem>
 
+                <ui:NavigationViewItem Content="辅助操控"
+                                       NavigationCacheMode="Enabled"
+                                       TargetPageType="{x:Type pages:MacroSettingsPage}">
+                    <ui:NavigationViewItem.Icon>
+                        <ui:SymbolIcon Symbol="XboxController24" />
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>
+
                 <ui:NavigationViewItem Content="快捷键"
                                        NavigationCacheMode="Enabled"
                                        TargetPageType="{x:Type pages:HotKeyPage}">
@@ -127,6 +140,13 @@
                         <ui:SymbolIcon Symbol="Flash24" />
                     </ui:NavigationViewItem.Icon>
                 </ui:NavigationViewItem>
+                <!--<ui:NavigationViewItem Content="按键绑定"
+                                       NavigationCacheMode="Enabled"
+                                       TargetPageType="{x:Type pages:KeyBindingsSettingsPage}" Cursor="Hand">
+                    <ui:NavigationViewItem.Icon>
+                        <ui:SymbolIcon Symbol="KeyboardMouse16" />
+                    </ui:NavigationViewItem.Icon>
+                </ui:NavigationViewItem>-->
                 <ui:NavigationViewItem Content="通知"
                                        NavigationCacheMode="Enabled"
                                        TargetPageType="{x:Type pages:NotificationSettingsPage}">
@@ -154,12 +174,21 @@
 
         <ui:TitleBar Title="{Binding Title, Mode=OneWay}" Grid.Row="0">
             <ui:TitleBar.Icon>
-                <ui:ImageIcon Source="pack://application:,,,/Assets/Kirara.png" />
+                <ui:ImageIcon Source="pack://application:,,,/Assets/Images/logo.png" />
             </ui:TitleBar.Icon>
-            <ui:TitleBar.Header>
-                <StackPanel>
-                    <ui:Button Width="44"
-                               Height="30"
+            <ui:TitleBar.TrailingContent>
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Top">
+                    <ui:Button Width="46"
+                               Height="32"
+                               Background="Transparent"
+                               BorderBrush="Transparent"
+                               Command="{Binding SwitchBackdropCommand}"
+                               CornerRadius="0"
+                               Icon="{ui:SymbolIcon Blur24}"
+                               ToolTip="切换毛玻璃效果"
+                               Visibility="{Binding IsWin11Later, Converter={StaticResource BooleanToVisibilityConverter}, Mode=OneWay}" />
+                    <ui:Button Width="46"
+                               Height="32"
                                Background="Transparent"
                                BorderBrush="Transparent"
                                Command="{Binding HideCommand}"
@@ -167,12 +196,12 @@
                                Icon="{ui:SymbolIcon CaretDown24}"
                                ToolTip="最小化到托盘" />
                 </StackPanel>
-            </ui:TitleBar.Header>
+            </ui:TitleBar.TrailingContent>
         </ui:TitleBar>
 
         <tray:NotifyIcon Grid.Row="0"
                          FocusOnLeftClick="False"
-                         Icon="pack://application:,,,/Assets/logo.ico"
+                         Icon="pack://application:,,,/Assets/Images/logo.ico"
                          LeftDoubleClick="OnNotifyIconLeftDoubleClick"
                          MenuOnRightClick="True"
                          TooltipText="BetterGI">

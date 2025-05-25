@@ -10,6 +10,7 @@ using BetterGenshinImpact.GameTask.AutoWood.Assets;
 using BetterGenshinImpact.GameTask.Common.Element.Assets;
 using BetterGenshinImpact.GameTask.GameLoading;
 using BetterGenshinImpact.GameTask.GameLoading.Assets;
+using BetterGenshinImpact.GameTask.Model;
 using BetterGenshinImpact.GameTask.Placeholder;
 using BetterGenshinImpact.GameTask.QuickSereniteaPot.Assets;
 using BetterGenshinImpact.GameTask.QuickTeleport.Assets;
@@ -77,23 +78,30 @@ internal class GameTaskManager
     /// </summary>
     /// <param name="name"></param>
     /// <param name="externalConfig"></param>
-    public static void AddTrigger(string name, object? externalConfig)
+    public static bool AddTrigger(string name, object? externalConfig)
     {
         TriggerDictionary ??= new ConcurrentDictionary<string, ITaskTrigger>();
-        TriggerDictionary.Clear(); //TODO 有问题，不应该清理
 
-        if (name == "AutoPick")
+        ITaskTrigger? trigger = null;
+        string? triggerName = null;
+        switch (name)
         {
-            TriggerDictionary.TryAdd("AutoPick", new AutoPick.AutoPickTrigger(externalConfig as AutoPickExternalConfig));
+            case "AutoPick":
+                triggerName = "AutoPick";
+                trigger = new AutoPick.AutoPickTrigger(externalConfig as AutoPickExternalConfig);
+                break;
+            case "AutoSkip":
+                triggerName = "AutoSkip";
+                trigger = new AutoSkip.AutoSkipTrigger();
+                break;
         }
-        // else if (name == "AutoSkip")
-        // {
-        //     TriggerDictionary.Add("AutoSkip", new AutoSkip.AutoSkipTrigger());
-        // }
-        // else if (name == "AutoFish")
-        // {
-        //     TriggerDictionary.Add("AutoFish", new AutoFishing.AutoFishingTrigger());
-        // }
+
+        if (triggerName == null || trigger == null)
+        {
+            return false;
+        }
+        TriggerDictionary[triggerName] = trigger;
+        return true;
     }
 
     public static void RefreshTriggerConfigs()
@@ -104,12 +112,12 @@ internal class GameTaskManager
             TriggerDictionary.GetValueOrDefault("AutoSkip")?.Init();
             TriggerDictionary.GetValueOrDefault("AutoFish")?.Init();
             TriggerDictionary.GetValueOrDefault("QuickTeleport")?.Init();
-            TriggerDictionary.GetValueOrDefault("GameLoading")?.Init();
+            // TriggerDictionary.GetValueOrDefault("GameLoading")?.Init();
             TriggerDictionary.GetValueOrDefault("AutoCook")?.Init();
             // 清理画布
-            WeakReferenceMessenger.Default.Send(new PropertyChangedMessage<object>(new object(), "RemoveAllButton", new object(), ""));
             VisionContext.Instance().DrawContent.ClearAll();
         }
+
         ReloadAssets();
     }
 
@@ -125,6 +133,7 @@ internal class GameTaskManager
         ElementAssets.DestroyInstance();
         QuickSereniteaPotAssets.DestroyInstance();
         GameLoadingAssets.DestroyInstance();
+        MapLazyAssets.DestroyInstance();
     }
 
     /// <summary>
@@ -138,8 +147,17 @@ internal class GameTaskManager
     /// <exception cref="FileNotFoundException"></exception>
     public static Mat LoadAssetImage(string featName, string assertName, ImreadModes flags = ImreadModes.Color)
     {
-        var info = TaskContext.Instance().SystemInfo;
-        var assetsFolder = Global.Absolute($@"GameTask\{featName}\Assets\{info.GameScreenSize.Width}x{info.GameScreenSize.Height}");
+        return LoadAssetImage(featName, assertName, TaskContext.Instance().SystemInfo, flags);
+    }
+
+    /// <summary>
+    /// 获取素材图片并缩放
+    /// </summary>
+    /// <returns></returns>
+    /// <exception cref="FileNotFoundException"></exception>
+    public static Mat LoadAssetImage(string featName, string assertName, ISystemInfo systemInfo, ImreadModes flags = ImreadModes.Color)
+    {
+        var assetsFolder = Global.Absolute($@"GameTask\{featName}\Assets\{systemInfo.GameScreenSize.Width}x{systemInfo.GameScreenSize.Height}");
         if (!Directory.Exists(assetsFolder))
         {
             assetsFolder = Global.Absolute($@"GameTask\{featName}\Assets\1920x1080");
@@ -157,9 +175,9 @@ internal class GameTaskManager
         }
 
         var mat = Mat.FromStream(File.OpenRead(filePath), flags);
-        if (info.GameScreenSize.Width != 1920)
+        if (systemInfo.GameScreenSize.Width != 1920)
         {
-            mat = ResizeHelper.Resize(mat, info.AssetScale);
+            mat = ResizeHelper.Resize(mat, systemInfo.AssetScale);
         }
 
         return mat;

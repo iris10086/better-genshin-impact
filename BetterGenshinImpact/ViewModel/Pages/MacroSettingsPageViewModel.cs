@@ -11,7 +11,7 @@ using Wpf.Ui.Controls;
 
 namespace BetterGenshinImpact.ViewModel.Pages;
 
-public partial class MacroSettingsPageViewModel : ObservableObject, INavigationAware, IViewModel
+public partial class MacroSettingsPageViewModel : ViewModel
 {
     public AllConfig Config { get; set; }
 
@@ -25,15 +25,7 @@ public partial class MacroSettingsPageViewModel : ObservableObject, INavigationA
         Config = configService.Get();
         _navigationService = navigationService;
     }
-
-    public void OnNavigatedTo()
-    {
-    }
-
-    public void OnNavigatedFrom()
-    {
-    }
-
+    
     [RelayCommand]
     public void OnGoToHotKeyPage()
     {
@@ -49,6 +41,6 @@ public partial class MacroSettingsPageViewModel : ObservableObject, INavigationA
     [RelayCommand]
     public void OnGoToOneKeyMacroUrl()
     {
-        Process.Start(new ProcessStartInfo("https://bgi.huiyadan.com/feats/onem.html") { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo("https://bettergi.com/feats/macro/onem.html") { UseShellExecute = true });
     }
 }

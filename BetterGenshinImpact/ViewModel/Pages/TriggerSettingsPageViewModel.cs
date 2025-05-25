@@ -1,6 +1,7 @@
 ﻿using BetterGenshinImpact.Core.Config;
 using BetterGenshinImpact.GameTask.AutoPick;
 using BetterGenshinImpact.GameTask.AutoSkip.Assets;
+using BetterGenshinImpact.GameTask.AutoSkip.Model;
 using BetterGenshinImpact.Service.Interface;
 using BetterGenshinImpact.View.Pages;
 using BetterGenshinImpact.View.Windows;
@@ -13,16 +14,19 @@ using Wpf.Ui.Controls;
 
 namespace BetterGenshinImpact.ViewModel.Pages;
 
-public partial class TriggerSettingsPageViewModel : ObservableObject, INavigationAware, IViewModel
+public partial class TriggerSettingsPageViewModel : ViewModel
 {
     [ObservableProperty]
     private string[] _clickChatOptionNames = ["优先选择第一个选项", "随机选择选项", "优先选择最后一个选项", "不选择选项"];
 
     [ObservableProperty]
+    private string[] _selectChatOptionTypeNames = [SelectChatOptionTypes.UseMouse, SelectChatOptionTypes.UseInteractionKey];
+
+    [ObservableProperty]
     private string[] _pickOcrEngineNames = [PickOcrEngineEnum.Paddle.ToString(), PickOcrEngineEnum.Yap.ToString()];
 
     [ObservableProperty]
-    private string[] _defaultPickButtonNames = ["F", "E"];
+    private List<string> _pickButtonNames;
 
     public AllConfig Config { get; set; }
 
@@ -36,14 +40,15 @@ public partial class TriggerSettingsPageViewModel : ObservableObject, INavigatio
         Config = configService.Get();
         _navigationService = navigationService;
         _hangoutBranches = HangoutConfig.Instance.HangoutOptionsTitleList;
-    }
 
-    public void OnNavigatedTo()
-    {
-    }
-
-    public void OnNavigatedFrom()
-    {
+        _pickButtonNames = new List<string> { "F", "E", "G" };
+        if (!string.IsNullOrEmpty(Config.AutoPickConfig.PickKey)
+            && Config.AutoPickConfig.PickKey.Length == 1
+            && char.IsUpper(Config.AutoPickConfig.PickKey[0])
+            && !_pickButtonNames.Contains(Config.AutoPickConfig.PickKey))
+        {
+            _pickButtonNames.Add(Config.AutoPickConfig.PickKey);
+        }
     }
 
     [RelayCommand]

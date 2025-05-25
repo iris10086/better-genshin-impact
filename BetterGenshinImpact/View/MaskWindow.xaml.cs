@@ -5,8 +5,6 @@ using BetterGenshinImpact.Genshin.Settings;
 using BetterGenshinImpact.Helpers;
 using BetterGenshinImpact.Helpers.DpiAwareness;
 using BetterGenshinImpact.View.Drawable;
-using CommunityToolkit.Mvvm.Messaging;
-using CommunityToolkit.Mvvm.Messaging.Messages;
 using Microsoft.Extensions.Logging;
 using Serilog.Sinks.RichTextBox.Abstraction;
 using System;
@@ -19,6 +17,7 @@ using System.Windows.Documents;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
+using BetterGenshinImpact.Genshin.Settings2;
 using Vanara.PInvoke;
 using FontFamily = System.Windows.Media.FontFamily;
 
@@ -93,15 +92,7 @@ public partial class MaskWindow : Window
             Top = currentRect.Top / dpiScale;
             Width = currentRect.Width / dpiScale;
             Height = currentRect.Height / dpiScale;
-
-            Canvas.SetTop(LogTextBoxWrapper, Height - LogTextBoxWrapper.Height - 65);
-            Canvas.SetLeft(LogTextBoxWrapper, 20);
-            Canvas.SetTop(StatusWrapper, Height - LogTextBoxWrapper.Height - 90);
-            Canvas.SetLeft(StatusWrapper, 20);
         });
-        // 重新计算控件位置
-        // shit code 预定了
-        WeakReferenceMessenger.Default.Send(new PropertyChangedMessage<object>(this, "RefreshSettings", new object(), "重新计算控件位置"));
     }
 
     public void RefreshPositionForSubform()
@@ -110,18 +101,6 @@ public partial class MaskWindow : Window
         _ = User32.GetClientRect(targetHWnd, out RECT targetRect);
         float x = DpiHelper.GetScale(targetHWnd).X;
         _ = User32.SetWindowPos(_hWnd, IntPtr.Zero, 0, 0, (int)(targetRect.Width * x), (int)(targetRect.Height * x), User32.SetWindowPosFlags.SWP_SHOWWINDOW);
-
-        Invoke(() =>
-        {
-            Canvas.SetTop(LogTextBoxWrapper, Height * 1d / DpiHelper.ScaleY - LogTextBoxWrapper.Height * 1d / DpiHelper.ScaleY - 65);
-            Canvas.SetLeft(LogTextBoxWrapper, 20);
-            Canvas.SetTop(StatusWrapper, Height * 1d / DpiHelper.ScaleY - LogTextBoxWrapper.Height * 1d / DpiHelper.ScaleY - 90);
-            Canvas.SetLeft(StatusWrapper, 20);
-        });
-
-        // 重新计算控件位置
-        // shit code 预定了
-        WeakReferenceMessenger.Default.Send(new PropertyChangedMessage<object>(this, "RefreshSettings", new object(), "重新计算控件位置"));
     }
 
     public MaskWindow()
@@ -172,30 +151,43 @@ public partial class MaskWindow : Window
 
         if (width * 9 != height * 16)
         {
-            _logger.LogWarning("当前游戏分辨率不是16:9，部分功能可能无法正常使用");
+            _logger.LogError("当前游戏分辨率不是16:9，一条龙、配队识别、地图传送、地图追踪等所有独立任务与全自动任务相关功能，都将会无法正常使用！");
         }
+        
+        AfterburnerWarning();
 
         // 读取游戏注册表配置
-        ReadGameSettings();
+        GameSettingsChecker.LoadGameSettingsAndCheck();
+    }
+    
+    /**
+     * MSIAfterburner.exe 在左上角会导致识别失败
+     */
+    private void AfterburnerWarning()
+    {
+        if (Process.GetProcessesByName("MSIAfterburner").Length > 0)
+        {
+            _logger.LogWarning("检测到 MSI Afterburner 正在运行，如果信息位于特定UI上遮盖图像识别要素可能导致识别失败，请关闭MSI Afterburner 或者调整信息位置后重试！");
+        }
     }
 
-    private void ReadGameSettings()
-    {
-        try
-        {
-            SettingsContainer settings = new();
-            TaskContext.Instance().GameSettings = settings;
-            var lang = settings.Language?.TextLang;
-            if (lang != null && lang != TextLanguage.SimplifiedChinese)
-            {
-                _logger.LogWarning("当前游戏语言{Lang}不是简体中文，部分功能可能无法正常使用。The game language is not Simplified Chinese, some functions may not work properly", lang);
-            }
-        }
-        catch (Exception e)
-        {
-            _logger.LogWarning("游戏注册表配置信息读取失败：" + e.Source + "\r\n--" + Environment.NewLine + e.StackTrace + "\r\n---" + Environment.NewLine + e.Message);
-        }
-    }
+    // private void ReadGameSettings()
+    // {
+    //     try
+    //     {
+    //         SettingsContainer settings = new();
+    //         TaskContext.Instance().GameSettings = settings;
+    //         var lang = settings.Language?.TextLang;
+    //         if (lang != null && lang != TextLanguage.SimplifiedChinese)
+    //         {
+    //             _logger.LogWarning("当前游戏语言{Lang}不是简体中文，部分功能可能无法正常使用。The game language is not Simplified Chinese, some functions may not work properly", lang);
+    //         }
+    //     }
+    //     catch (Exception e)
+    //     {
+    //         _logger.LogWarning("游戏注册表配置信息读取失败：" + e.Source + "\r\n--" + Environment.NewLine + e.StackTrace + "\r\n---" + Environment.NewLine + e.Message);
+    //     }
+    // }
 
     protected override void OnSourceInitialized(EventArgs e)
     {

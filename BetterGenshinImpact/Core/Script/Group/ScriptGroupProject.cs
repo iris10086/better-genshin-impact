@@ -4,10 +4,12 @@ using BetterGenshinImpact.Core.Script.Project;
 using BetterGenshinImpact.GameTask;
 using BetterGenshinImpact.GameTask.AutoPathing;
 using BetterGenshinImpact.GameTask.AutoPathing.Model;
+using BetterGenshinImpact.GameTask.Shell;
 using BetterGenshinImpact.ViewModel.Pages;
 using CommunityToolkit.Mvvm.ComponentModel;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Dynamic;
 using System.IO;
 using System.Text.Json.Serialization;
@@ -64,6 +66,22 @@ public partial class ScriptGroupProject : ObservableObject
 
     public ExpandoObject? JsScriptSettingsObject { get; set; }
 
+    /// <summary>
+    /// 所属配置组
+    /// </summary>
+    [JsonIgnore]
+    public ScriptGroup? GroupInfo { get; set; }
+
+    /// <summary>
+    /// 下一个从此执行标志
+    /// </summary>
+    [JsonIgnore]
+    [ObservableProperty]
+    public bool? _nextFlag = false;
+    
+    [ObservableProperty]
+    private bool? _allowJsNotification = true;
+
     public ScriptGroupProject()
     {
     }
@@ -99,6 +117,11 @@ public partial class ScriptGroupProject : ObservableObject
         return new ScriptGroupProject(name, name, "KeyMouse");
     }
 
+    public static ScriptGroupProject BuildShellProject(string command)
+    {
+        return new ScriptGroupProject(command, "", "Shell");
+    }
+
     public static ScriptGroupProject BuildPathingProject(string name, string folder)
     {
         return new ScriptGroupProject(name, folder, "Pathing");
@@ -124,24 +147,45 @@ public partial class ScriptGroupProject : ObservableObject
             {
                 throw new Exception("JS脚本未初始化");
             }
-            await Project.ExecuteAsync(JsScriptSettingsObject);
+            JsScriptSettingsObject ??= new ExpandoObject();
+
+            var pathingPartyConfig = GroupInfo?.Config.PathingConfig;
+            if (!(pathingPartyConfig is { Enabled: true, JsScriptUseEnabled: true }))
+            {
+                pathingPartyConfig = null;
+            }
+
+            await Project.ExecuteAsync(JsScriptSettingsObject, pathingPartyConfig);
         }
-        if (Type == "KeyMouse")
+        else if (Type == "KeyMouse")
         {
             // 加载并执行
             var json = await File.ReadAllTextAsync(Global.Absolute(@$"User\KeyMouseScript\{Name}"));
             await KeyMouseMacroPlayer.PlayMacro(json, CancellationContext.Instance.Cts.Token, false);
         }
-        if (Type == "Pathing")
+        else if (Type == "Pathing")
         {
             // 加载并执行
             var task = PathingTask.BuildFromFilePath(Path.Combine(MapPathingViewModel.PathJsonPath, FolderName, Name));
-            TaskTriggerDispatcher.Instance().AddTrigger("AutoPick", null);
-            await new PathExecutor(CancellationContext.Instance.Cts).Pathing(task);
+            var pathingTask = new PathExecutor(CancellationContext.Instance.Cts.Token);
+            pathingTask.PartyConfig = GroupInfo?.Config.PathingConfig;
+            if (pathingTask.PartyConfig is null || pathingTask.PartyConfig.AutoPickEnabled)
+            {
+                TaskTriggerDispatcher.Instance().AddTrigger("AutoPick", null);
+            }
+
+            await pathingTask.Pathing(task);
         }
-        else
+        else if (Type == "Shell")
         {
-            //throw new Exception("不支持的脚本类型");
+            ShellConfig? shellConfig = null;
+            if (GroupInfo?.Config.EnableShellConfig ?? false)
+            {
+                shellConfig = GroupInfo?.Config.ShellConfig;
+            }
+
+            var task = new ShellTask(ShellTaskParam.BuildFromConfig(Name, shellConfig ?? new ShellConfig()));
+            await task.Start(CancellationContext.Instance.Cts.Token);
         }
     }
 
@@ -167,7 +211,8 @@ public class ScriptGroupProjectExtensions
     {
         { "Javascript", "JS脚本" },
         { "KeyMouse", "键鼠脚本" },
-        { "Pathing", "路径追踪" }
+        { "Pathing", "地图追踪" },
+        { "Shell", "Shell" }
     };
 
     public static readonly Dictionary<string, string> StatusDescriptions = new()

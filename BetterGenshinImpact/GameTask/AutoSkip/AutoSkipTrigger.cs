@@ -3,6 +3,7 @@ using BetterGenshinImpact.Core.Recognition;
 using BetterGenshinImpact.Core.Recognition.OCR;
 using BetterGenshinImpact.Core.Recognition.OpenCv;
 using BetterGenshinImpact.Core.Simulator;
+using BetterGenshinImpact.Core.Simulator.Extensions;
 using BetterGenshinImpact.GameTask.AutoSkip.Assets;
 using BetterGenshinImpact.GameTask.AutoSkip.Model;
 using BetterGenshinImpact.GameTask.Common;
@@ -21,6 +22,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
+using BetterGenshinImpact.GameTask.AutoPick.Assets;
+using BetterGenshinImpact.GameTask.Common.BgiVision;
 using Vanara.PInvoke;
 using Region = BetterGenshinImpact.GameTask.Model.Area.Region;
 
@@ -38,7 +41,11 @@ public partial class AutoSkipTrigger : ITaskTrigger
     public int Priority => 20;
     public bool IsExclusive => false;
 
-    public bool IsBackgroundRunning { get; set; }
+    public bool IsBackgroundRunning { get; private set; }
+    
+    public bool UseBackgroundOperation { get; private set; }
+
+    public bool IsUseInteractionKey { get; set; } = false;
 
     private readonly AutoSkipAssets _autoSkipAssets;
 
@@ -60,19 +67,41 @@ public partial class AutoSkipTrigger : ITaskTrigger
     private List<string> _selectList = [];
 
     private PostMessageSimulator? _postMessageSimulator;
+    
+    private readonly bool _isCustomConfiguration;
 
     public AutoSkipTrigger()
     {
         _autoSkipAssets = AutoSkipAssets.Instance;
         _config = TaskContext.Instance().Config.AutoSkipConfig;
     }
+    
+    /// <summary>
+    /// 用于内部的其他方法调用
+    /// </summary>
+    /// <param name="config"></param>
+    public AutoSkipTrigger(AutoSkipConfig config)
+    {
+        _autoSkipAssets = AutoSkipAssets.Instance;
+        _config = config;
+        _isCustomConfiguration = true;
+    }
 
     public void Init()
     {
         IsEnabled = _config.Enabled;
         IsBackgroundRunning = _config.RunBackgroundEnabled;
+        // IsUseInteractionKey = _config.SelectChatOptionType == SelectChatOptionTypes.UseInteractionKey;
         _postMessageSimulator = TaskContext.Instance().PostMessageSimulator;
 
+        if (!_isCustomConfiguration)
+        {
+            InitKeyword();
+        }
+    }
+
+    private void InitKeyword()
+    {
         try
         {
             var defaultPauseListJson = Global.ReadAllTextIfExist(@"User\AutoSkip\default_pause_options.json");
@@ -134,6 +163,7 @@ public partial class AutoSkipTrigger : ITaskTrigger
         {
             return;
         }
+        UseBackgroundOperation = IsBackgroundRunning && !SystemControl.IsGenshinImpactActive();
 
         _prevExecute = DateTime.Now;
 
@@ -173,18 +203,27 @@ public partial class AutoSkipTrigger : ITaskTrigger
             _prevPlayingTime = DateTime.Now;
             if (TaskContext.Instance().Config.AutoSkipConfig.QuicklySkipConversationsEnabled)
             {
-                if (IsBackgroundRunning)
+                if (IsUseInteractionKey)
                 {
-                    _postMessageSimulator?.KeyPressBackground(User32.VK.VK_SPACE);
+                    _postMessageSimulator? .SimulateActionBackground(GIActions.PickUpOrInteract); // 注意这里不是交互键 NOTE By Ayu0K: 这里确实是交互键
                 }
                 else
                 {
-                    Simulation.SendInput.Keyboard.KeyPress(User32.VK.VK_SPACE);
+                    _postMessageSimulator?.KeyPressBackground(User32.VK.VK_SPACE);
                 }
             }
 
             // 对话选项选择
-            var hasOption = ChatOptionChoose(content.CaptureRectArea);
+            bool hasOption;
+            if (UseBackgroundOperation || IsUseInteractionKey)
+            {
+                hasOption = ChatOptionChooseUseKey(content.CaptureRectArea);
+            }
+            else
+            {
+                hasOption = ChatOptionChoose(content.CaptureRectArea);
+            }
+
 
             // 邀约选项选择 1s 1次
             if (_config.AutoHangoutEventEnabled && !hasOption)
@@ -219,7 +258,7 @@ public partial class AutoSkipTrigger : ITaskTrigger
             var rate = blackCount * 1d / (grayMat.Width * grayMat.Height);
             if (rate is >= 0.5 and < 0.98999)
             {
-                if (IsBackgroundRunning)
+                if (UseBackgroundOperation)
                 {
                     TaskContext.Instance().PostMessageSimulator?.LeftButtonClickBackground();
                 }
@@ -234,6 +273,7 @@ public partial class AutoSkipTrigger : ITaskTrigger
                 return true;
             }
         }
+
         return false;
     }
 
@@ -317,7 +357,7 @@ public partial class AutoSkipTrigger : ITaskTrigger
                 using var skipRa = captureRegion.Find(_autoSkipAssets.HangoutSkipRo);
                 if (skipRa.IsExist())
                 {
-                    if (IsBackgroundRunning && !SystemControl.IsGenshinImpactActive())
+                    if (UseBackgroundOperation && !SystemControl.IsGenshinImpactActive())
                     {
                         skipRa.BackgroundClick();
                     }
@@ -325,6 +365,7 @@ public partial class AutoSkipTrigger : ITaskTrigger
                     {
                         skipRa.Click();
                     }
+
                     AutoHangoutSkipLog("点击跳过按钮");
                 }
             }
@@ -375,6 +416,63 @@ public partial class AutoSkipTrigger : ITaskTrigger
     private static partial Regex EnOrNumRegex();
 
     /// <summary>
+    /// 5.2 版本直接交互键就能使用的对话选择
+    /// </summary>
+    /// <param name="region"></param>
+    /// <returns></returns>
+    private bool ChatOptionChooseUseKey(ImageRegion region)
+    {
+        if (_config.IsClickNoneChatOption())
+        {
+            return false;
+        }
+        
+        using var chatOptionResult = region.Find(_autoSkipAssets.OptionIconRo);
+        var isInChat = false;
+        isInChat = chatOptionResult.IsExist();
+        if (!isInChat)
+        {
+            using var pickRa = region.Find(AutoPickAssets.Instance.ChatPickRo);
+            isInChat = pickRa.IsExist();
+        }
+
+        if (isInChat)
+        {
+            var fKey = AutoPickAssets.Instance.PickVk;
+            if (_config.IsClickFirstChatOption())
+            {
+                _postMessageSimulator?.KeyPressBackground(fKey);
+            }
+            else if (_config.IsClickRandomChatOption())
+            {
+                var random = new Random();
+                // 随机 0~4 的数字
+                var r = random.Next(0, 5);
+                for (var j = 0; j < r; j++)
+                {
+                    _postMessageSimulator?.KeyPressBackground(User32.VK.VK_S);
+                    Thread.Sleep(100);
+                }
+
+                Thread.Sleep(50);
+                _postMessageSimulator?.KeyPressBackground(fKey);
+            }
+            else
+            {
+                _postMessageSimulator?.KeyPressBackground(User32.VK.VK_W);
+                Thread.Sleep(100);
+                _postMessageSimulator?.KeyPressBackground(fKey);
+            }
+            
+            AutoSkipLog("交互键点击(后台)");
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// 新的对话选项选择
     ///
     /// 返回 true 表示存在对话选项，但是不一定点击了
@@ -385,6 +483,7 @@ public partial class AutoSkipTrigger : ITaskTrigger
         {
             return false;
         }
+
         var assetScale = TaskContext.Instance().SystemInfo.AssetScale;
 
         // 感叹号识别 遇到直接点击
@@ -428,6 +527,7 @@ public partial class AutoSkipTrigger : ITaskTrigger
                 {
                     continue;
                 }
+
                 if (i != ocrResList.Count - 1)
                 {
                     if (ocrResList[i + 1].Y - ocrResList[i].Y > 150)
@@ -520,7 +620,7 @@ public partial class AutoSkipTrigger : ITaskTrigger
 
                 // 没OCR到文字，直接选择气泡选项
                 Thread.Sleep(_config.AfterChooseOptionSleepDelay);
-                clickRect.Click();
+                ClickOcrRegion(clickRect);
                 var msg = _config.IsClickFirstChatOption() ? "第一个" : "最后一个";
                 AutoSkipLog($"点击{msg}气泡选项");
             }
@@ -537,7 +637,8 @@ public partial class AutoSkipTrigger : ITaskTrigger
         {
             Thread.Sleep(_config.AfterChooseOptionSleepDelay);
         }
-        if (IsBackgroundRunning && !SystemControl.IsGenshinImpactActive())
+
+        if (UseBackgroundOperation && !SystemControl.IsGenshinImpactActive())
         {
             region.BackgroundClick();
         }
@@ -545,6 +646,7 @@ public partial class AutoSkipTrigger : ITaskTrigger
         {
             region.Click();
         }
+
         AutoSkipLog(region.Text);
     }
 
@@ -554,7 +656,8 @@ public partial class AutoSkipTrigger : ITaskTrigger
         {
             Thread.Sleep(_config.AutoHangoutChooseOptionSleepDelay);
         }
-        if (IsBackgroundRunning && !SystemControl.IsGenshinImpactActive())
+
+        if (UseBackgroundOperation && !SystemControl.IsGenshinImpactActive())
         {
             option.BackgroundClick();
         }
@@ -598,13 +701,16 @@ public partial class AutoSkipTrigger : ITaskTrigger
         {
             return;
         }
-
+        
         content.CaptureRectArea.Find(_autoSkipAssets.PageCloseRo, pageCloseRoRa =>
         {
-            TaskContext.Instance().PostMessageSimulator.KeyPress(User32.VK.VK_ESCAPE);
+            if (!Bv.IsInBigMapUi(content.CaptureRectArea))
+            {
+                TaskContext.Instance().PostMessageSimulator.KeyPress(User32.VK.VK_ESCAPE);
 
-            AutoSkipLog("关闭弹出页");
-            pageCloseRoRa.Dispose();
+                AutoSkipLog("关闭弹出页");
+                pageCloseRoRa.Dispose();
+            }
         });
     }
 

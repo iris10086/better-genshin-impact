@@ -13,12 +13,14 @@ using OpenCvSharp.Extensions;
 using Sdcb.PaddleOCR;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Threading;
+using BetterGenshinImpact.Core.Simulator;
 using static BetterGenshinImpact.GameTask.Common.TaskControl;
 
 namespace BetterGenshinImpact.GameTask.AutoFight.Model;
@@ -31,17 +33,28 @@ public class CombatScenes : IDisposable
     /// <summary>
     /// 当前配队
     /// </summary>
-    public Avatar[] Avatars { get; set; } = new Avatar[1];
+    private Avatar[] Avatars { set; get; } = [];
 
-    public Dictionary<string, Avatar> AvatarMap { get; set; } = [];
+    public int AvatarCount => Avatars.Length;
 
-    public int AvatarCount { get; set; }
 
     private readonly YoloV8Predictor _predictor =
         YoloV8Builder.CreateDefaultBuilder()
-            .UseOnnxModel(Global.Absolute("Assets\\Model\\Common\\avatar_side_classify_sim.onnx"))
+            .UseOnnxModel(Global.Absolute(@"Assets\Model\Common\avatar_side_classify_sim.onnx"))
             .WithSessionOptions(BgiSessionOption.Instance.Options)
             .Build();
+
+    public int ExpectedTeamAvatarNum { get; private set; } = 4;
+
+    /// <summary>
+    /// 获取一个只读的Avatars
+    /// </summary>
+    /// <returns>Avatars</returns>
+    public ReadOnlyCollection<Avatar> GetAvatars()
+    {
+        return Avatars.AsReadOnly();
+    }
+
 
     /// <summary>
     /// 通过YOLO分类器识别队伍内角色
@@ -49,6 +62,7 @@ public class CombatScenes : IDisposable
     /// <param name="imageRegion">完整游戏画面的捕获截图</param>
     public CombatScenes InitializeTeam(ImageRegion imageRegion)
     {
+        AssertUtils.CheckGameResolution();
         // 优先取配置
         if (!string.IsNullOrEmpty(TaskContext.Instance().Config.AutoFightConfig.TeamNames))
         {
@@ -56,14 +70,50 @@ public class CombatScenes : IDisposable
             return this;
         }
 
+        // 判断当前是否处于联机状态
+        List<Rect> avatarSideIconRectList;
+        List<Rect> avatarIndexRectList;
+        var pRaList = imageRegion.FindMulti(AutoFightAssets.Instance.PRa);
+        if (pRaList.Count > 0)
+        {
+            var num = pRaList.Count + 1;
+            if (num > 4)
+            {
+                throw new Exception("当前处于联机状态，但是队伍人数超过4人，无法识别");
+            }
+
+            // 联机状态下判断
+            var onePRa = imageRegion.Find(AutoFightAssets.Instance.OnePRa);
+            var p = "p";
+            if (!onePRa.IsEmpty())
+            {
+                Logger.LogInformation("当前处于联机状态，且当前账号是房主，联机人数{Num}人", num);
+                p = "1p";
+            }
+            else
+            {
+                Logger.LogInformation("当前处于联机状态，且在别人世界中，联机人数{Num}人", num);
+            }
+
+            avatarSideIconRectList = AutoFightAssets.Instance.AvatarSideIconRectListMap[$"{p}_{num}"];
+            avatarIndexRectList = AutoFightAssets.Instance.AvatarIndexRectListMap[$"{p}_{num}"];
+
+            ExpectedTeamAvatarNum = avatarSideIconRectList.Count;
+        }
+        else
+        {
+            avatarSideIconRectList = AutoFightAssets.Instance.AvatarSideIconRectList;
+            avatarIndexRectList = AutoFightAssets.Instance.AvatarIndexRectList;
+        }
+
         // 识别队伍
-        var names = new string[4];
-        var displayNames = new string[4];
+        var names = new string[avatarSideIconRectList.Count];
+        var displayNames = new string[avatarSideIconRectList.Count];
         try
         {
-            for (var i = 0; i < AutoFightAssets.Instance.AvatarSideIconRectList.Count; i++)
+            for (var i = 0; i < avatarSideIconRectList.Count; i++)
             {
-                var ra = imageRegion.DeriveCrop(AutoFightAssets.Instance.AvatarSideIconRectList[i]);
+                var ra = imageRegion.DeriveCrop(avatarSideIconRectList[i]);
                 var pair = ClassifyAvatarCnName(ra.SrcBitmap, i + 1);
                 names[i] = pair.Item1;
                 if (!string.IsNullOrEmpty(pair.Item2))
@@ -81,14 +131,15 @@ public class CombatScenes : IDisposable
                     displayNames[i] = pair.Item1;
                 }
             }
+
             Logger.LogInformation("识别到的队伍角色:{Text}", string.Join(",", displayNames));
-            Avatars = BuildAvatars([.. names]);
-            AvatarMap = Avatars.ToDictionary(x => x.Name);
+            Avatars = BuildAvatars([.. names], null, avatarIndexRectList);
         }
         catch (Exception e)
         {
             Logger.LogWarning(e.Message);
         }
+
         return this;
     }
 
@@ -124,18 +175,20 @@ public class CombatScenes : IDisposable
         if (result.TopClass.Name.Name.StartsWith("Qin") || result.TopClass.Name.Name.Contains("Costume"))
         {
             // 降低琴和衣装角色的识别率要求
-            if (result.TopClass.Confidence < 0.6)
+            if (result.TopClass.Confidence < 0.51)
             {
                 Cv2.ImWrite(@"log\avatar_side_classify_error.png", src.ToMat());
-                throw new Exception($"无法识别第{index}位角色，置信度{result.TopClass.Confidence}，结果：{result.TopClass.Name.Name}");
+                throw new Exception(
+                    $"无法识别第{index}位角色，置信度{result.TopClass.Confidence:F1}，结果：{result.TopClass.Name.Name}。请重新阅读 BetterGI 文档中的《快速上手》！");
             }
         }
         else
         {
-            if (result.TopClass.Confidence < 0.8)
+            if (result.TopClass.Confidence < 0.7)
             {
                 Cv2.ImWrite(@"log\avatar_side_classify_error.png", src.ToMat());
-                throw new Exception($"无法识别第{index}位角色，置信度{result.TopClass.Confidence}，结果：{result.TopClass.Name.Name}");
+                throw new Exception(
+                    $"无法识别第{index}位角色，置信度{result.TopClass.Confidence:F1}，结果：{result.TopClass.Name.Name}。请重新阅读 BetterGI 文档中的《快速上手》！");
             }
         }
 
@@ -159,12 +212,11 @@ public class CombatScenes : IDisposable
         Logger.LogInformation("强制指定队伍角色:{Text}", string.Join(",", names));
         TaskContext.Instance().Config.AutoFightConfig.TeamNames = string.Join(",", names);
         Avatars = BuildAvatars([.. names]);
-        AvatarMap = Avatars.ToDictionary(x => x.Name);
     }
 
     public bool CheckTeamInitialized()
     {
-        if (Avatars.Length < 4)
+        if (Avatars.Length != ExpectedTeamAvatarNum)
         {
             return false;
         }
@@ -172,34 +224,145 @@ public class CombatScenes : IDisposable
         return true;
     }
 
-    private Avatar[] BuildAvatars(List<string> names, List<Rect>? nameRects = null)
+
+    private Avatar[] BuildAvatars(List<string> names, List<Rect>? nameRects = null,
+        List<Rect>? avatarIndexRectList = null)
     {
-        AvatarCount = names.Count;
-        var avatars = new Avatar[AvatarCount];
-        for (var i = 0; i < AvatarCount; i++)
+        var cdConfig = TaskContext.Instance().Config.AutoFightConfig.ActionSchedulerByCd;
+        if (avatarIndexRectList == null && ExpectedTeamAvatarNum == 4)
         {
-            var nameRect = nameRects?[i] ?? Rect.Empty;
-            avatars[i] = new Avatar(this, names[i], i + 1, nameRect)
+            avatarIndexRectList = AutoFightAssets.Instance.AvatarIndexRectList;
+        }
+
+        if (avatarIndexRectList == null)
+        {
+            throw new Exception("联机状态下，此方法必须传入队伍角色编号位置信息");
+        }
+
+        var namesCount = names.Count;
+        var avatars = new Avatar[namesCount];
+        for (var i = 0; i < namesCount; i++)
+        {
+            var nameRect = nameRects?[i] ?? default;
+            // 根据手动写的出招表来优化CD
+            var cd = Avatar.ParseActionSchedulerByCd(names[i], cdConfig);
+            avatars[i] = new Avatar(this, names[i], i + 1, nameRect, cd ?? -1)
             {
-                IndexRect = AutoFightContext.Instance.FightAssets.AvatarIndexRectList[i]
+                IndexRect = avatarIndexRectList[i]
             };
         }
 
         return avatars;
     }
 
-    public void BeforeTask(CancellationTokenSource cts)
+    /// <summary>
+    /// 更新角色手动设置的CD
+    /// </summary>
+    /// <param name="cdConfig">配置字符串</param>
+    /// <returns>返回配置中有效的角色名</returns>
+    public List<string> UpdateActionSchedulerByCd(string cdConfig)
+    {
+        if (string.IsNullOrEmpty(cdConfig))
+        {
+            return [];
+        }
+
+        List<string> names = [];
+        foreach (var t in Avatars)
+        {
+            var mCd = Avatar.ParseActionSchedulerByCd(t.Name, cdConfig);
+            // 手动cd不为0，不是麦当劳不是0
+            if (mCd is null) continue;
+            t.ManualSkillCd = (double)mCd;
+            names.Add(t.Name);
+        }
+
+        return names;
+    }
+
+    public void BeforeTask(CancellationToken ct)
     {
         for (var i = 0; i < AvatarCount; i++)
         {
-            Avatars[i].Cts = cts;
+            Avatars[i].Ct = ct;
+        }
+    }
+
+    public void AfterTask()
+    {
+        // 释放所有按键
+        Simulation.ReleaseAllKey();
+
+        var mwk = SelectAvatar("玛薇卡");
+        if (mwk != null)
+        {
+            foreach (var avatar in Avatars)
+            {
+                if (avatar.Name != "玛薇卡")
+                {
+                    avatar.Switch();
+                }
+            }
         }
     }
 
     public Avatar? SelectAvatar(string name)
     {
-        return AvatarMap.TryGetValue(name, out var avatar) ? avatar : null;
+        return Avatars.FirstOrDefault(avatar => avatar.Name.Equals(name));
     }
+
+    /// <summary>
+    /// 使用编号切换角色
+    /// </summary>
+    /// <param name="avatarIndex">从1开始</param>
+    /// <returns></returns>
+    public Avatar? SelectAvatar(int avatarIndex)
+    {
+        if (avatarIndex < 1 || avatarIndex > AvatarCount)
+        {
+            Logger.LogError("切换角色编号错误，当前角色数量{Count}，编号{Index}", AvatarCount, avatarIndex);
+            return null;
+        }
+
+        return Avatars[avatarIndex - 1];
+    }
+
+    /// <summary>
+    /// 获取当前出战角色名
+    /// </summary>
+    /// <param name="force"></param>
+    /// <param name="region"></param>
+    /// <param name="ct"></param>
+    /// <returns></returns>
+    public string? CurrentAvatar(bool force = false, ImageRegion? region = null,
+        CancellationToken ct = default)
+    {
+        if (!force && Avatar.LastActiveAvatar is not null)
+        {
+            return Avatar.LastActiveAvatar;
+        }
+
+        var imageRegion = region ?? CaptureToRectArea();
+        string? avatarName = null;
+
+        var notActiveCount = 0;
+        foreach (var avatar in GetAvatars())
+        {
+            if (avatar.IsActive(imageRegion))
+            {
+                avatarName = avatar.Name;
+            }
+            else
+            {
+                notActiveCount++;
+            }
+        }
+
+        if (notActiveCount != ExpectedTeamAvatarNum - 1) return avatarName;
+        Avatar.LastActiveAvatar = avatarName;
+        return Avatar.LastActiveAvatar;
+    }
+
 
     #region OCR识别队伍（已弃用）
 
@@ -218,9 +381,10 @@ public class CombatScenes : IDisposable
         }
 
         // 剪裁出队伍区域
-        var teamRa = content.CaptureRectArea.DeriveCrop(AutoFightContext.Instance.FightAssets.TeamRectNoIndex);
+        var teamRa = content.CaptureRectArea.DeriveCrop(AutoFightAssets.Instance.TeamRectNoIndex);
         // 过滤出白色
-        var hsvFilterMat = OpenCvCommonHelper.InRangeHsv(teamRa.SrcMat, new Scalar(0, 0, 210), new Scalar(255, 30, 255));
+        var hsvFilterMat =
+            OpenCvCommonHelper.InRangeHsv(teamRa.SrcMat, new Scalar(0, 0, 210), new Scalar(255, 30, 255));
 
         // 识别队伍内角色
         var result = OcrFactory.Paddle.OcrResult(hsvFilterMat);
@@ -253,10 +417,10 @@ public class CombatScenes : IDisposable
         {
             // 流浪者特殊处理
             // 4人以上的队伍，不支持流浪者的识别
-            var wanderer = rectArea.Find(AutoFightContext.Instance.FightAssets.WandererIconRa);
+            var wanderer = rectArea.Find(AutoFightAssets.Instance.WandererIconRa);
             if (wanderer.IsEmpty())
             {
-                wanderer = rectArea.Find(AutoFightContext.Instance.FightAssets.WandererIconNoActiveRa);
+                wanderer = rectArea.Find(AutoFightAssets.Instance.WandererIconNoActiveRa);
             }
 
             if (wanderer.IsEmpty())
@@ -278,7 +442,8 @@ public class CombatScenes : IDisposable
                     }
 
                     var rect = item.Rect.BoundingRect();
-                    if (rect.Y > wanderer.Y && wanderer.Y + wanderer.Height > rect.Y + rect.Height && !names.Contains("流浪者"))
+                    if (rect.Y > wanderer.Y && wanderer.Y + wanderer.Height > rect.Y + rect.Height &&
+                        !names.Contains("流浪者"))
                     {
                         names.Add("流浪者");
                         nameRects.Add(item.Rect.BoundingRect());
@@ -294,7 +459,6 @@ public class CombatScenes : IDisposable
 
         Logger.LogInformation("识别到的队伍角色:{Text}", string.Join(",", names));
         Avatars = BuildAvatars(names, nameRects);
-        AvatarMap = Avatars.ToDictionary(x => x.Name);
     }
 
     [Obsolete]

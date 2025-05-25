@@ -1,4 +1,5 @@
-﻿using BetterGenshinImpact.Core.Recorder;
+﻿using BetterGenshinImpact.Core.Config;
+using BetterGenshinImpact.Core.Recorder;
 using BetterGenshinImpact.Core.Simulator;
 using BetterGenshinImpact.GameTask;
 using BetterGenshinImpact.Model;
@@ -18,12 +19,20 @@ public class MouseKeyMonitor
     /// </summary>
     private readonly Timer _fTimer = new();
 
+    private Keys _pickUpKey = Keys.F;
+
+    private User32.VK _pickUpKeyCode = User32.VK.VK_F;
+
     //private readonly Random _random = new();
 
     /// <summary>
     ///     长按空格变空格连发
     /// </summary>
     private readonly Timer _spaceTimer = new();
+
+    private Keys _releaseControlKey = Keys.Space;
+
+    private User32.VK _releaseControlKeyCode = User32.VK.VK_SPACE;
 
     private DateTime _firstFKeyDownTime = DateTime.MaxValue;
 
@@ -46,27 +55,33 @@ public class MouseKeyMonitor
         _globalHook.MouseDownExt += GlobalHookMouseDownExt;
         _globalHook.MouseUpExt += GlobalHookMouseUpExt;
         _globalHook.MouseMoveExt += GlobalHookMouseMoveExt;
+        _globalHook.MouseWheelExt += GlobalHookMouseWheelExt;
         //_globalHook.KeyPress += GlobalHookKeyPress;
+
+        _pickUpKey = TaskContext.Instance().Config.KeyBindingsConfig.PickUpOrInteract.ToWinFormKeys();
+        _pickUpKeyCode = TaskContext.Instance().Config.KeyBindingsConfig.PickUpOrInteract.ToVK();
+        _releaseControlKey = TaskContext.Instance().Config.KeyBindingsConfig.Jump.ToWinFormKeys();
+        _releaseControlKeyCode = TaskContext.Instance().Config.KeyBindingsConfig.Jump.ToVK();
 
         _firstSpaceKeyDownTime = DateTime.MaxValue;
         var si = TaskContext.Instance().Config.MacroConfig.SpaceFireInterval;
         _spaceTimer.Interval = si;
-        _spaceTimer.Elapsed += (sender, args) => { Simulation.PostMessage(_hWnd).KeyPress(User32.VK.VK_SPACE); };
+        _spaceTimer.Elapsed += (sender, args) => { Simulation.PostMessage(_hWnd).KeyPress(_releaseControlKeyCode); };
 
         var fi = TaskContext.Instance().Config.MacroConfig.FFireInterval;
         _fTimer.Interval = fi;
-        _fTimer.Elapsed += (sender, args) => { Simulation.PostMessage(_hWnd).KeyPress(User32.VK.VK_F); };
+        _fTimer.Elapsed += (sender, args) => { Simulation.PostMessage(_hWnd).KeyPress(_pickUpKeyCode); };
     }
 
     private void GlobalHookKeyDown(object? sender, KeyEventArgs e)
     {
         // Debug.WriteLine("KeyDown: \t{0}", e.KeyCode);
-        GlobalKeyMouseRecord.Instance.GlobalHookKeyDown(e);
+        GlobalKeyMouseRecord.Instance.GlobalHookKeyDown(e, Kernel32.GetTickCount());
 
         // 热键按下事件
         HotKeyDown(sender, e);
 
-        if (e.KeyCode == Keys.Space)
+        if (e.KeyCode == _releaseControlKey)
         {
             if (_firstSpaceKeyDownTime == DateTime.MaxValue)
             {
@@ -80,7 +95,7 @@ public class MouseKeyMonitor
                         _spaceTimer.Start();
             }
         }
-        else if (e.KeyCode == Keys.F)
+        else if (e.KeyCode == _pickUpKey)
         {
             if (_firstFKeyDownTime == DateTime.MaxValue)
             {
@@ -99,12 +114,12 @@ public class MouseKeyMonitor
     private void GlobalHookKeyUp(object? sender, KeyEventArgs e)
     {
         // Debug.WriteLine("KeyUp: \t{0}", e.KeyCode);
-        GlobalKeyMouseRecord.Instance.GlobalHookKeyUp(e);
+        GlobalKeyMouseRecord.Instance.GlobalHookKeyUp(e, Kernel32.GetTickCount());
 
         // 热键松开事件
         HotKeyUp(sender, e);
 
-        if (e.KeyCode == Keys.Space)
+        if (e.KeyCode == _releaseControlKey)
         {
             if (_firstSpaceKeyDownTime != DateTime.MaxValue)
             {
@@ -114,7 +129,7 @@ public class MouseKeyMonitor
                 _spaceTimer.Stop();
             }
         }
-        else if (e.KeyCode == Keys.F)
+        else if (e.KeyCode == _pickUpKey)
         {
             if (_firstFKeyDownTime != DateTime.MaxValue)
             {
@@ -166,6 +181,12 @@ public class MouseKeyMonitor
         // Debug.WriteLine("MouseMove: {0}; \t Location: {1};\t System Timestamp: {2}", e.Button, e.Location, e.Timestamp);
         GlobalKeyMouseRecord.Instance.GlobalHookMouseMoveTo(e);
     }
+    
+    private void GlobalHookMouseWheelExt(object? sender, MouseEventExtArgs e)
+    {
+        // Debug.WriteLine("MouseMove: {0}; \t Location: {1};\t Delta: {2};\t System Timestamp: {3}", e.Button, e.Location, e.Delta, e.Timestamp);
+        GlobalKeyMouseRecord.Instance.GlobalHookMouseWheel(e);
+    }
 
     public void Unsubscribe()
     {
@@ -176,6 +197,7 @@ public class MouseKeyMonitor
             _globalHook.MouseDownExt -= GlobalHookMouseDownExt;
             _globalHook.MouseUpExt -= GlobalHookMouseUpExt;
             _globalHook.MouseMoveExt -= GlobalHookMouseMoveExt;
+            _globalHook.MouseWheelExt -= GlobalHookMouseWheelExt;
             //_globalHook.KeyPress -= GlobalHookKeyPress;
             _globalHook.Dispose();
         }

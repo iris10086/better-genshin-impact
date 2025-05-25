@@ -148,6 +148,13 @@ public partial class HotKeyConfig : ObservableObject
 
     [ObservableProperty]
     private string _autoMusicGameHotkeyType = HotKeyTypeEnum.KeyboardMonitor.ToString();
+    
+    // 活动音游开始/停止
+    [ObservableProperty]
+    private string _autoFishingGameHotkey = "";
+
+    [ObservableProperty]
+    private string _autoFishingGameHotkeyType = HotKeyTypeEnum.KeyboardMonitor.ToString();
 
     // 自动寻路
     [ObservableProperty]
@@ -211,11 +218,23 @@ public partial class HotKeyConfig : ObservableObject
 
     [ObservableProperty]
     private string _keyMouseMacroRecordHotkeyType = HotKeyTypeEnum.KeyboardMonitor.ToString();
+    // 暂停
+    [ObservableProperty]
+    private string _suspendHotkey = "";
 
+    [ObservableProperty]
+    private string _suspendHotkeyType = HotKeyTypeEnum.KeyboardMonitor.ToString();
     // 停止任意独立任务
     [ObservableProperty]
     private string _cancelTaskHotkey = "";
 
     [ObservableProperty]
     private string _cancelTaskHotkeyType = HotKeyTypeEnum.KeyboardMonitor.ToString();
+    
+    // 停止任意独立任务
+    [ObservableProperty]
+    private string _onedragonHotkey = "";
+
+    [ObservableProperty]
+    private string _onedragonHotkeyType = HotKeyTypeEnum.KeyboardMonitor.ToString();
 }

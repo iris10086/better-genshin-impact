@@ -1,4 +1,6 @@
 ﻿using BetterGenshinImpact.Core.Config;
+using BetterGenshinImpact.Core.Script;
+using BetterGenshinImpact.Core.Script.Group;
 using BetterGenshinImpact.Core.Script.Project;
 using BetterGenshinImpact.Service.Interface;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -10,40 +12,45 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
-using BetterGenshinImpact.Core.Script.Group;
+using BetterGenshinImpact.Helpers;
+using BetterGenshinImpact.ViewModel.Message;
+using CommunityToolkit.Mvvm.Messaging;
 using Wpf.Ui;
 using Wpf.Ui.Controls;
 using Wpf.Ui.Violeta.Controls;
-using BetterGenshinImpact.GameTask.AutoPathing.Model;
 
 namespace BetterGenshinImpact.ViewModel.Pages;
 
-public partial class JsListViewModel : ObservableObject, INavigationAware, IViewModel
+public partial class JsListViewModel : ViewModel
 {
     private readonly ILogger<JsListViewModel> _logger = App.GetLogger<JsListViewModel>();
-    private readonly string scriptPath = Global.Absolute("Script");
+    private readonly string scriptPath = Global.ScriptPath();
 
     [ObservableProperty]
     private ObservableCollection<ScriptProject> _scriptItems = [];
 
-    private ISnackbarService _snackbarService;
-    private IScriptService _scriptService;
+    private readonly IScriptService _scriptService;
 
-    public JsListViewModel(ISnackbarService snackbarService, IScriptService scriptService)
+    public AllConfig Config { get; set; }
+
+    public JsListViewModel(IScriptService scriptService, IConfigService configService)
     {
-        _snackbarService = snackbarService;
         _scriptService = scriptService;
+        Config = configService.Get();
+
+        // 注册消息
+        WeakReferenceMessenger.Default.Register<RefreshDataMessage>(this, (r, m) => InitScriptListViewData());
     }
 
     private void InitScriptListViewData()
     {
-        _scriptItems.Clear();
+        ScriptItems.Clear();
         var directoryInfos = LoadScriptFolder(scriptPath);
         foreach (var f in directoryInfos)
         {
             try
             {
-                _scriptItems.Add(new ScriptProject(f.Name));
+                ScriptItems.Add(new ScriptProject(f.Name));
             }
             catch (Exception e)
             {
@@ -64,13 +71,9 @@ public partial class JsListViewModel : ObservableObject, INavigationAware, IView
         return di.GetDirectories();
     }
 
-    public void OnNavigatedTo()
+    public override void OnNavigatedTo()
     {
         InitScriptListViewData();
-    }
-
-    public void OnNavigatedFrom()
-    {
     }
 
     [RelayCommand]
@@ -92,6 +95,13 @@ public partial class JsListViewModel : ObservableObject, INavigationAware, IView
         {
             return;
         }
+
+        if (!string.IsNullOrEmpty(item.Manifest.SettingsUi))
+        {
+            Toast.Information("此脚本存在配置，不配置可能无法正常运行，建议请添加至【调度器】，并右键修改配置后使用！");
+            _logger.LogWarning("此脚本存在配置，可能无法直接从脚本界面运行，建议请添加至【调度器】，并右键修改配置后使用！");
+        }
+
         await _scriptService.RunMulti([new ScriptGroupProject(item)]);
     }
 
@@ -99,5 +109,18 @@ public partial class JsListViewModel : ObservableObject, INavigationAware, IView
     public void OnRefresh(ScriptProject? item)
     {
         InitScriptListViewData();
+    }
+
+    [RelayCommand]
+    public void OnGoToJsScriptUrl()
+    {
+        Process.Start(new ProcessStartInfo("https://bettergi.com/feats/autos/jsscript.html") { UseShellExecute = true });
+    }
+
+    [RelayCommand]
+    public void OnOpenLocalScriptRepo()
+    {
+        Config.ScriptConfig.ScriptRepoHintDotVisible = false;
+        ScriptRepoUpdater.Instance.OpenLocalRepoInWebView();
     }
 }
